@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useRef, useEffect } from "react";
+import { useState, useRef, useEffect, Suspense } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useToast } from "@/components/Toast";
 
@@ -15,7 +15,7 @@ interface Temple {
   is_coming_soon: boolean;
 }
 
-export default function TemplesPage() {
+function TemplesPageContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const { showToast } = useToast();
@@ -1141,5 +1141,13 @@ export default function TemplesPage() {
         </div>
       )}
     </div>
+  );
+}
+
+export default function TemplesPage() {
+  return (
+    <Suspense fallback={<div className="flex min-h-screen items-center justify-center"><div className="h-8 w-8 animate-spin rounded-full border-b-2 border-[var(--brand-red)]" /></div>}>
+      <TemplesPageContent />
+    </Suspense>
   );
 }

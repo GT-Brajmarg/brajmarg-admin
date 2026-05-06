@@ -211,8 +211,9 @@ export async function DELETE(request: NextRequest) {
       .single();
 
     // Delete all images from storage
-    if (frameToDelete?.temples?.name && frameToDelete?.name) {
-      const sanitizedTempleName = frameToDelete.temples.name
+    const temples = frameToDelete?.temples as unknown as { name: string } | null;
+    if (temples?.name && frameToDelete?.name) {
+      const sanitizedTempleName = temples.name
         .toLowerCase()
         .replace(/[^a-z0-9\s]/g, "")
         .replace(/\s+/g, "_")
