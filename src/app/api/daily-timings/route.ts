@@ -10,7 +10,8 @@ export async function GET(request: NextRequest) {
     let query = supabase
       .from("temple_timings")
       .select("*, temples(name, location)")
-      .order("day_of_week", { ascending: true });
+      .order("day_of_week", { ascending: true })
+      .order("opening_time", { ascending: true });
 
     if (templeId) {
       query = query.eq("temple_id", templeId);
@@ -36,59 +37,71 @@ export async function GET(request: NextRequest) {
   }
 }
 
-// POST - Create a new daily timing
+// POST - Create multiple daily timings (batch creation)
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { temple_id, day_of_week, opening_time, closing_time, label, special_note, is_active } = body;
+    const { temple_id, day_of_week, timings } = body;
 
     // Validate required fields
-    if (!temple_id || day_of_week === undefined || !opening_time || !closing_time) {
+    if (!temple_id || day_of_week === undefined || !timings || !Array.isArray(timings) || timings.length === 0) {
       return NextResponse.json(
-        { error: "Temple ID, day of week, opening time, and closing time are required" },
+        { error: "Temple ID, day of week, and at least one timing are required" },
         { status: 400 }
       );
     }
 
-    // Check if timing already exists for this temple and day
-    const { data: existingTiming } = await supabase
+    // Validate each timing has required fields
+    for (const timing of timings) {
+      if (!timing.label || !timing.opening_time || !timing.closing_time) {
+        return NextResponse.json(
+          { error: "Each timing must have label, opening_time, and closing_time" },
+          { status: 400 }
+        );
+      }
+    }
+
+    // Check if timings already exist for this temple and day
+    const { data: existingTimings } = await supabase
       .from("temple_timings")
       .select("id")
       .eq("temple_id", temple_id)
-      .eq("day_of_week", day_of_week)
-      .single();
+      .eq("day_of_week", day_of_week);
 
-    if (existingTiming) {
+    if (existingTimings && existingTimings.length > 0) {
+      const dayName = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][day_of_week];
       return NextResponse.json(
-        { error: `Timing for ${["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][day_of_week]} already exists` },
+        { error: `Timings for ${dayName} already exist for this temple. Please edit the existing entry.` },
         { status: 400 }
       );
     }
 
-    // Insert new timing
-    const { data: newTiming, error } = await supabase
+    // Prepare timings for insertion
+    const timingsToInsert = timings.map((timing: { label: string; opening_time: string; closing_time: string; special_note?: string; is_active?: boolean }) => ({
+      temple_id,
+      day_of_week,
+      label: timing.label,
+      opening_time: timing.opening_time,
+      closing_time: timing.closing_time,
+      special_note: timing.special_note || "",
+      is_active: timing.is_active ?? true,
+    }));
+
+    // Insert all timings
+    const { data: newTimings, error } = await supabase
       .from("temple_timings")
-      .insert({
-        temple_id,
-        day_of_week,
-        opening_time,
-        closing_time,
-        label: label || "",
-        special_note: special_note || "",
-        is_active: is_active ?? true,
-      })
-      .select()
-      .single();
+      .insert(timingsToInsert)
+      .select();
 
     if (error) {
-      console.error("Error creating timing:", error);
+      console.error("Error creating timings:", error);
       return NextResponse.json(
-        { error: "Failed to create timing" },
+        { error: "Failed to create timings" },
         { status: 500 }
       );
     }
 
-    return NextResponse.json({ timing: newTiming }, { status: 201 });
+    return NextResponse.json({ timings: newTimings }, { status: 201 });
   } catch (error) {
     console.error("Error in POST /api/daily-timings:", error);
     return NextResponse.json(
@@ -98,43 +111,75 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// PUT - Update a daily timing
+// PUT - Update timings for a temple+day (replaces all existing)
 export async function PUT(request: NextRequest) {
   try {
     const body = await request.json();
-    const { id, day_of_week, opening_time, closing_time, label, special_note, is_active } = body;
+    const { temple_id, day_of_week, timings } = body;
 
-    if (!id) {
+    if (!temple_id || day_of_week === undefined) {
       return NextResponse.json(
-        { error: "Timing ID is required" },
+        { error: "Temple ID and day of week are required" },
         { status: 400 }
       );
     }
 
-    const { data: updatedTiming, error } = await supabase
+    // Delete all existing timings for this temple+day
+    const { error: deleteError } = await supabase
       .from("temple_timings")
-      .update({
-        day_of_week,
-        opening_time,
-        closing_time,
-        label,
-        special_note,
-        is_active,
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", id)
-      .select()
-      .single();
+      .delete()
+      .eq("temple_id", temple_id)
+      .eq("day_of_week", day_of_week);
 
-    if (error) {
-      console.error("Error updating timing:", error);
+    if (deleteError) {
+      console.error("Error deleting existing timings:", deleteError);
       return NextResponse.json(
-        { error: "Failed to update timing" },
+        { error: "Failed to update timings" },
         { status: 500 }
       );
     }
 
-    return NextResponse.json({ timing: updatedTiming });
+    // If no timings provided, just return success (all deleted)
+    if (!timings || timings.length === 0) {
+      return NextResponse.json({ timings: [], message: "All timings deleted" });
+    }
+
+    // Validate each timing has required fields
+    for (const timing of timings) {
+      if (!timing.label || !timing.opening_time || !timing.closing_time) {
+        return NextResponse.json(
+          { error: "Each timing must have label, opening_time, and closing_time" },
+          { status: 400 }
+        );
+      }
+    }
+
+    // Prepare timings for insertion
+    const timingsToInsert = timings.map((timing: { label: string; opening_time: string; closing_time: string; special_note?: string; is_active?: boolean }) => ({
+      temple_id,
+      day_of_week,
+      label: timing.label,
+      opening_time: timing.opening_time,
+      closing_time: timing.closing_time,
+      special_note: timing.special_note || "",
+      is_active: timing.is_active ?? true,
+    }));
+
+    // Insert new timings
+    const { data: newTimings, error: insertError } = await supabase
+      .from("temple_timings")
+      .insert(timingsToInsert)
+      .select();
+
+    if (insertError) {
+      console.error("Error inserting timings:", insertError);
+      return NextResponse.json(
+        { error: "Failed to update timings" },
+        { status: 500 }
+      );
+    }
+
+    return NextResponse.json({ timings: newTimings });
   } catch (error) {
     console.error("Error in PUT /api/daily-timings:", error);
     return NextResponse.json(
@@ -144,15 +189,16 @@ export async function PUT(request: NextRequest) {
   }
 }
 
-// DELETE - Delete a daily timing
+// DELETE - Delete all timings for a temple+day
 export async function DELETE(request: NextRequest) {
   try {
     const { searchParams } = new URL(request.url);
-    const id = searchParams.get("id");
+    const templeId = searchParams.get("temple_id");
+    const dayOfWeek = searchParams.get("day_of_week");
 
-    if (!id) {
+    if (!templeId || dayOfWeek === null) {
       return NextResponse.json(
-        { error: "Timing ID is required" },
+        { error: "Temple ID and day of week are required" },
         { status: 400 }
       );
     }
@@ -160,12 +206,13 @@ export async function DELETE(request: NextRequest) {
     const { error } = await supabase
       .from("temple_timings")
       .delete()
-      .eq("id", id);
+      .eq("temple_id", templeId)
+      .eq("day_of_week", parseInt(dayOfWeek));
 
     if (error) {
-      console.error("Error deleting timing:", error);
+      console.error("Error deleting timings:", error);
       return NextResponse.json(
-        { error: "Failed to delete timing" },
+        { error: "Failed to delete timings" },
         { status: 500 }
       );
     }

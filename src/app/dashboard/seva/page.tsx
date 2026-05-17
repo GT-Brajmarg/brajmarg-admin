@@ -26,6 +26,50 @@ interface SevaItem {
   };
 }
 
+// Helper to convert 24h time to 12h AM/PM format
+const formatTo12Hour = (time24: string): string => {
+  if (!time24) return "";
+  const [hours, minutes] = time24.split(":").map(Number);
+  const period = hours >= 12 ? "PM" : "AM";
+  const hour12 = hours % 12 || 12;
+  return `${hour12}:${minutes.toString().padStart(2, "0")} ${period}`;
+};
+
+// Helper to convert 12h AM/PM format to 24h time
+const parseTo24Hour = (time12: string): string => {
+  if (!time12) return "";
+  const match = time12.match(/(\d{1,2}):(\d{2})\s*(AM|PM)/i);
+  if (!match) return "";
+  let hours = parseInt(match[1], 10);
+  const minutes = match[2];
+  const period = match[3].toUpperCase();
+  if (period === "PM" && hours !== 12) hours += 12;
+  if (period === "AM" && hours === 12) hours = 0;
+  return `${hours.toString().padStart(2, "0")}:${minutes}`;
+};
+
+// Helper to parse time range string into start and end times
+const parseTimeRange = (timeRange: string): { start: string; end: string } => {
+  if (!timeRange) return { start: "", end: "" };
+  const parts = timeRange.split("-").map((s) => s.trim());
+  if (parts.length !== 2) return { start: "", end: "" };
+  return {
+    start: parseTo24Hour(parts[0]),
+    end: parseTo24Hour(parts[1]),
+  };
+};
+
+// Helper to format start and end times into time range string
+const formatTimeRange = (start: string, end: string): string => {
+  if (!start && !end) return "";
+  const startFormatted = formatTo12Hour(start);
+  const endFormatted = formatTo12Hour(end);
+  if (startFormatted && endFormatted) {
+    return `${startFormatted} - ${endFormatted}`;
+  }
+  return startFormatted || endFormatted;
+};
+
 export default function SevaPage() {
   const router = useRouter();
   const { showToast } = useToast();
@@ -40,7 +84,8 @@ export default function SevaPage() {
     temple_id: "",
     name: "",
     price: 0,
-    time: "",
+    startTime: "",
+    endTime: "",
     details: "",
     significance: "",
     is_active: true,
@@ -86,7 +131,8 @@ export default function SevaPage() {
       temple_id: temples.length > 0 ? temples[0].id : "",
       name: "",
       price: 0,
-      time: "",
+      startTime: "",
+      endTime: "",
       details: "",
       significance: "",
       is_active: true,
@@ -97,11 +143,13 @@ export default function SevaPage() {
 
   const openEditModal = (seva: SevaItem) => {
     setEditingSeva(seva);
+    const { start, end } = parseTimeRange(seva.time || "");
     setFormData({
       temple_id: seva.temple_id,
       name: seva.name,
       price: seva.price,
-      time: seva.time || "",
+      startTime: start,
+      endTime: end,
       details: seva.details || "",
       significance: seva.significance || "",
       is_active: seva.is_active,
@@ -131,6 +179,8 @@ export default function SevaPage() {
 
     setIsSaving(true);
     try {
+      const timeRangeString = formatTimeRange(formData.startTime, formData.endTime);
+
       if (editingSeva) {
         // Update existing seva
         const response = await fetch("/api/seva", {
@@ -141,7 +191,7 @@ export default function SevaPage() {
             temple_id: formData.temple_id,
             name: formData.name,
             price: formData.price,
-            time: formData.time || null,
+            time: timeRangeString || null,
             details: formData.details || null,
             significance: formData.significance || null,
             is_active: formData.is_active,
@@ -165,7 +215,7 @@ export default function SevaPage() {
             temple_id: formData.temple_id,
             name: formData.name,
             price: formData.price,
-            time: formData.time || null,
+            time: timeRangeString || null,
             details: formData.details || null,
             significance: formData.significance || null,
             is_active: formData.is_active,
@@ -627,39 +677,53 @@ export default function SevaPage() {
                   />
                 </div>
 
-                {/* Price and Time */}
-                <div className="grid grid-cols-2 gap-4">
-                  <div>
-                    <label className="mb-1 block text-sm font-medium text-foreground">
-                      Price (₹) <span className="text-red-500">*</span>
-                    </label>
-                    <input
-                      type="number"
-                      value={formData.price}
-                      onChange={(e) =>
-                        setFormData({
-                          ...formData,
-                          price: parseFloat(e.target.value) || 0,
-                        })
-                      }
-                      min="0"
-                      step="0.01"
-                      className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand-red focus:outline-none focus:ring-1 focus:ring-brand-red"
-                    />
-                  </div>
-                  <div>
-                    <label className="mb-1 block text-sm font-medium text-foreground">
-                      Time
-                    </label>
-                    <input
-                      type="text"
-                      value={formData.time}
-                      onChange={(e) =>
-                        setFormData({ ...formData, time: e.target.value })
-                      }
-                      placeholder="e.g., 6:00 AM - 7:00 AM"
-                      className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand-red focus:outline-none focus:ring-1 focus:ring-brand-red"
-                    />
+                {/* Price */}
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-foreground">
+                    Price (₹) <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="number"
+                    value={formData.price}
+                    onChange={(e) =>
+                      setFormData({
+                        ...formData,
+                        price: parseFloat(e.target.value) || 0,
+                      })
+                    }
+                    min="0"
+                    step="0.01"
+                    className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand-red focus:outline-none focus:ring-1 focus:ring-brand-red"
+                  />
+                </div>
+
+                {/* Time Range */}
+                <div>
+                  <label className="mb-1 block text-sm font-medium text-foreground">
+                    Time Range
+                  </label>
+                  <div className="grid grid-cols-2 gap-4">
+                    <div className="flex items-center gap-2">
+                      <input
+                        type="time"
+                        value={formData.startTime}
+                        onChange={(e) =>
+                          setFormData({ ...formData, startTime: e.target.value })
+                        }
+                        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand-red focus:outline-none focus:ring-1 focus:ring-brand-red"
+                      />
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-gray-500">to</span>
+                      <input
+                        type="time"
+                        value={formData.endTime}
+                        onChange={(e) =>
+                          setFormData({ ...formData, endTime: e.target.value })
+                        }
+                        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand-red focus:outline-none focus:ring-1 focus:ring-brand-red"
+                      />
+                    </div>
                   </div>
                 </div>
 

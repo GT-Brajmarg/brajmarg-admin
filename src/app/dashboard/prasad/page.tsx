@@ -54,6 +54,7 @@ export default function PrasadPage() {
 
   // For image gallery modal
   const [galleryPrasad, setGalleryPrasad] = useState<PrasadItem | null>(null);
+  const [viewingImageUrl, setViewingImageUrl] = useState<string | null>(null);
 
   // Pending images for new prasad (before saving)
   const [pendingImages, setPendingImages] = useState<File[]>([]);
@@ -95,10 +96,13 @@ export default function PrasadPage() {
       const data = await response.json();
       if (data.prasadItems) {
         setPrasadItems(data.prasadItems);
+        return data.prasadItems;
       }
+      return [];
     } catch (error) {
       console.error("Failed to fetch prasad items:", error);
       showToast("error", "Failed to load prasad items");
+      return [];
     } finally {
       setIsLoading(false);
     }
@@ -133,7 +137,7 @@ export default function PrasadPage() {
       displayOrder: prasad.display_order,
     });
     setPendingImages([]);
-    setPrimaryImageIndex(0);
+    setPrimaryImageIndex(-1); // In edit mode, new images are not primary by default
     setModalStep(1);
     setIsModalOpen(true);
   };
@@ -373,9 +377,9 @@ export default function PrasadPage() {
 
       if (response.ok) {
         showToast("success", "Primary image updated");
-        await fetchPrasadItems();
-        // Update gallery state
-        const updatedPrasad = prasadItems.find((p) => p.id === prasadId);
+        const updatedItems = await fetchPrasadItems();
+        // Update gallery state with fresh data
+        const updatedPrasad = updatedItems.find((p: PrasadItem) => p.id === prasadId);
         if (updatedPrasad) {
           setGalleryPrasad(updatedPrasad);
         }
@@ -1176,6 +1180,31 @@ export default function PrasadPage() {
                         </div>
                       )}
                       <div className="absolute inset-0 flex items-center justify-center gap-2 rounded-lg bg-black/50 opacity-0 transition-opacity group-hover:opacity-100">
+                        <button
+                          onClick={() => setViewingImageUrl(img.image_url)}
+                          className="rounded bg-blue-500 p-2 text-white hover:bg-blue-600"
+                          title="View full size"
+                        >
+                          <svg
+                            xmlns="http://www.w3.org/2000/svg"
+                            fill="none"
+                            viewBox="0 0 24 24"
+                            strokeWidth={2}
+                            stroke="currentColor"
+                            className="h-5 w-5"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              d="M2.036 12.322a1.012 1.012 0 0 1 0-.639C3.423 7.51 7.36 4.5 12 4.5c4.638 0 8.573 3.007 9.963 7.178.07.207.07.431 0 .639C20.577 16.49 16.64 19.5 12 19.5c-4.638 0-8.573-3.007-9.963-7.178Z"
+                            />
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              d="M15 12a3 3 0 1 1-6 0 3 3 0 0 1 6 0Z"
+                            />
+                          </svg>
+                        </button>
                         {!img.is_primary && (
                           <button
                             onClick={() =>
@@ -1229,6 +1258,43 @@ export default function PrasadPage() {
               )}
             </div>
           </div>
+        </div>
+      )}
+
+      {/* Full Size Image Viewer */}
+      {viewingImageUrl && (
+        <div
+          className="fixed inset-0 z-[60] flex items-center justify-center bg-black/90 p-4"
+          onClick={() => setViewingImageUrl(null)}
+        >
+          <button
+            onClick={() => setViewingImageUrl(null)}
+            className="absolute right-4 top-4 rounded-full bg-white/10 p-2 text-white hover:bg-white/20"
+          >
+            <svg
+              xmlns="http://www.w3.org/2000/svg"
+              fill="none"
+              viewBox="0 0 24 24"
+              strokeWidth={2}
+              stroke="currentColor"
+              className="h-6 w-6"
+            >
+              <path
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                d="M6 18 18 6M6 6l12 12"
+              />
+            </svg>
+          </button>
+          <Image
+            src={viewingImageUrl}
+            alt="Full size"
+            width={1200}
+            height={800}
+            className="max-h-[90vh] max-w-[90vw] rounded-lg object-contain"
+            unoptimized
+            onClick={(e) => e.stopPropagation()}
+          />
         </div>
       )}
     </div>

@@ -11,7 +11,9 @@ export async function POST(request: NextRequest) {
     const clothId = formData.get("clothId") as string;
     const clothName = formData.get("clothName") as string;
     const templeName = formData.get("templeName") as string;
-    const primaryIndex = parseInt(formData.get("primaryIndex") as string) || 0;
+    const primaryIndex = parseInt(formData.get("primaryIndex") as string);
+    // If primaryIndex is NaN (not provided), default to -1 (no primary)
+    const effectivePrimaryIndex = isNaN(primaryIndex) ? -1 : primaryIndex;
 
     if (!files || files.length === 0) {
       return NextResponse.json(
@@ -25,6 +27,14 @@ export async function POST(request: NextRequest) {
         { error: "Cloth ID, cloth name, and temple name are required" },
         { status: 400 }
       );
+    }
+
+    // If a new primary is being set, unset all existing primary images first
+    if (effectivePrimaryIndex >= 0) {
+      await supabase
+        .from("cloth_images")
+        .update({ is_primary: false })
+        .eq("cloth_id", clothId);
     }
 
     // Sanitize names for folder path
@@ -72,7 +82,7 @@ export async function POST(request: NextRequest) {
         .getPublicUrl(filePath);
 
       const publicUrl = `${urlData.publicUrl}?t=${Date.now()}`;
-      const isPrimary = i === primaryIndex;
+      const isPrimary = i === effectivePrimaryIndex;
 
       // Insert into cloth_images table
       const { error: dbError } = await supabase
