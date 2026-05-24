@@ -1,6 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 
+// At least one payment method must be enabled (applies to both package types).
+// Returns an error string or null. Treats undefined as "keep enabled".
+function validatePayment(body: {
+  allow_direct_payment?: unknown;
+  allow_cod?: unknown;
+}) {
+  const direct = body.allow_direct_payment !== false;
+  const cod = body.allow_cod !== false;
+  if (!direct && !cod) {
+    return "Select at least one payment method (Direct Payment or COD)";
+  }
+  return null;
+}
+
 // GET - Fetch all seva items with temple info
 export async function GET() {
   try {
@@ -48,6 +62,8 @@ export async function POST(request: NextRequest) {
       significance,
       is_active,
       display_order,
+      allow_direct_payment,
+      allow_cod,
     } = body;
 
     if (!temple_id || !name || price === undefined) {
@@ -55,6 +71,11 @@ export async function POST(request: NextRequest) {
         { error: "temple_id, name, and price are required" },
         { status: 400 }
       );
+    }
+
+    const paymentError = validatePayment(body);
+    if (paymentError) {
+      return NextResponse.json({ error: paymentError }, { status: 400 });
     }
 
     // If display_order conflicts, shift others
@@ -75,6 +96,8 @@ export async function POST(request: NextRequest) {
         significance: significance || null,
         is_active: is_active ?? true,
         display_order: display_order || 0,
+        allow_direct_payment: allow_direct_payment ?? true,
+        allow_cod: allow_cod ?? true,
       })
       .select()
       .single();
@@ -111,6 +134,8 @@ export async function PUT(request: NextRequest) {
       significance,
       is_active,
       display_order,
+      allow_direct_payment,
+      allow_cod,
     } = body;
 
     if (!id) {
@@ -118,6 +143,11 @@ export async function PUT(request: NextRequest) {
         { error: "Seva item ID is required" },
         { status: 400 }
       );
+    }
+
+    const paymentError = validatePayment(body);
+    if (paymentError) {
+      return NextResponse.json({ error: paymentError }, { status: 400 });
     }
 
     // Get current display order
@@ -164,6 +194,8 @@ export async function PUT(request: NextRequest) {
         significance: significance || null,
         is_active,
         display_order,
+        allow_direct_payment: allow_direct_payment ?? true,
+        allow_cod: allow_cod ?? true,
         updated_at: new Date().toISOString(),
       })
       .eq("id", id)

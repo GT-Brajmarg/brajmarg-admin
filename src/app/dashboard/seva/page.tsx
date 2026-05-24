@@ -20,6 +20,8 @@ interface SevaItem {
   significance: string | null;
   is_active: boolean;
   display_order: number;
+  allow_direct_payment: boolean;
+  allow_cod: boolean;
   temples?: {
     name: string;
     location: string;
@@ -45,6 +47,8 @@ export default function SevaPage() {
     significance: "",
     is_active: true,
     displayOrder: 1,
+    allow_direct_payment: true,
+    allow_cod: true,
   });
 
   useEffect(() => {
@@ -91,6 +95,8 @@ export default function SevaPage() {
       significance: "",
       is_active: true,
       displayOrder: sevaItems.length + 1,
+      allow_direct_payment: true,
+      allow_cod: true,
     });
     setIsModalOpen(true);
   };
@@ -106,6 +112,8 @@ export default function SevaPage() {
       significance: seva.significance || "",
       is_active: seva.is_active,
       displayOrder: seva.display_order,
+      allow_direct_payment: seva.allow_direct_payment ?? true,
+      allow_cod: seva.allow_cod ?? true,
     });
     setIsModalOpen(true);
   };
@@ -128,6 +136,10 @@ export default function SevaPage() {
       showToast("error", "Please enter a valid price");
       return;
     }
+    if (!formData.allow_direct_payment && !formData.allow_cod) {
+      showToast("error", "Select at least one payment method");
+      return;
+    }
 
     setIsSaving(true);
     try {
@@ -146,6 +158,8 @@ export default function SevaPage() {
             significance: formData.significance || null,
             is_active: formData.is_active,
             display_order: formData.displayOrder,
+            allow_direct_payment: formData.allow_direct_payment,
+            allow_cod: formData.allow_cod,
           }),
         });
 
@@ -170,6 +184,8 @@ export default function SevaPage() {
             significance: formData.significance || null,
             is_active: formData.is_active,
             display_order: formData.displayOrder,
+            allow_direct_payment: formData.allow_direct_payment,
+            allow_cod: formData.allow_cod,
           }),
         });
 
@@ -231,6 +247,8 @@ export default function SevaPage() {
           significance: seva.significance,
           is_active: seva.is_active,
           display_order: newOrder,
+          allow_direct_payment: seva.allow_direct_payment,
+          allow_cod: seva.allow_cod,
         }),
       });
 
@@ -257,6 +275,8 @@ export default function SevaPage() {
           significance: seva.significance,
           is_active: !seva.is_active,
           display_order: seva.display_order,
+          allow_direct_payment: seva.allow_direct_payment,
+          allow_cod: seva.allow_cod,
         }),
       });
 
@@ -486,6 +506,20 @@ export default function SevaPage() {
                     {seva.significance}
                   </p>
                 )}
+
+                {/* Payment methods */}
+                <div className="mt-2 flex flex-wrap gap-1">
+                  {seva.allow_direct_payment && (
+                    <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[11px] font-medium text-gray-600">
+                      Direct Payment
+                    </span>
+                  )}
+                  {seva.allow_cod && (
+                    <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[11px] font-medium text-gray-600">
+                      COD
+                    </span>
+                  )}
+                </div>
 
                 {/* Actions */}
                 <div className="mt-4 flex items-center justify-between border-t border-gray-100 pt-3">
@@ -732,6 +766,73 @@ export default function SevaPage() {
                       </span>
                     </label>
                   </div>
+                </div>
+
+                {/* Payment Options */}
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-foreground">
+                    Payment Options for Users <span className="text-red-500">*</span>
+                  </label>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <label
+                      className={`flex cursor-pointer items-start gap-2 rounded-lg border-2 p-3 transition-colors ${
+                        formData.allow_direct_payment
+                          ? "border-brand-red bg-brand-red/5"
+                          : "border-gray-200 hover:border-gray-300"
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={formData.allow_direct_payment}
+                        onChange={(e) =>
+                          setFormData({
+                            ...formData,
+                            allow_direct_payment: e.target.checked,
+                          })
+                        }
+                        className="mt-0.5 h-4 w-4 rounded border-gray-300 text-brand-red focus:ring-brand-red"
+                      />
+                      <span>
+                        <span className="block text-sm font-medium text-foreground">
+                          Direct Payment
+                        </span>
+                        <span className="block text-xs text-gray-500">
+                          Online payments via UPI, Card, Net Banking, etc.
+                        </span>
+                      </span>
+                    </label>
+                    <label
+                      className={`flex cursor-pointer items-start gap-2 rounded-lg border-2 p-3 transition-colors ${
+                        formData.allow_cod
+                          ? "border-brand-red bg-brand-red/5"
+                          : "border-gray-200 hover:border-gray-300"
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={formData.allow_cod}
+                        onChange={(e) =>
+                          setFormData({
+                            ...formData,
+                            allow_cod: e.target.checked,
+                          })
+                        }
+                        className="mt-0.5 h-4 w-4 rounded border-gray-300 text-brand-red focus:ring-brand-red"
+                      />
+                      <span>
+                        <span className="block text-sm font-medium text-foreground">
+                          Cash on Delivery (COD)
+                        </span>
+                        <span className="block text-xs text-gray-500">
+                          Cash payment option at the time of the seva.
+                        </span>
+                      </span>
+                    </label>
+                  </div>
+                  <p className="text-xs text-gray-400">
+                    Selected payment methods will be visible to users on the booking
+                    page. At least one is required.
+                  </p>
                 </div>
               </div>
             </div>

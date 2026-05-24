@@ -1,6 +1,43 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 
+// Validate group-package-only fields. Returns an error string or null.
+function validateGroupFields(body: {
+  weekdays?: unknown;
+  seats_total?: unknown;
+  departure_time?: unknown;
+}) {
+  const weekdays = body.weekdays;
+  if (!Array.isArray(weekdays) || weekdays.length === 0) {
+    return "Group packages require at least one recurring weekday";
+  }
+  if (!weekdays.every((d) => typeof d === "number" && d >= 0 && d <= 6)) {
+    return "weekdays must be integers 0 (Sun) to 6 (Sat)";
+  }
+  const seats = Number(body.seats_total);
+  if (!Number.isFinite(seats) || seats < 1) {
+    return "Group packages require seats_total of at least 1";
+  }
+  if (!body.departure_time) {
+    return "Group packages require a departure time";
+  }
+  return null;
+}
+
+// At least one payment method must be enabled (applies to both package types).
+// Returns an error string or null. Treats undefined as "keep enabled".
+function validatePayment(body: {
+  allow_direct_payment?: unknown;
+  allow_cod?: unknown;
+}) {
+  const direct = body.allow_direct_payment !== false;
+  const cod = body.allow_cod !== false;
+  if (!direct && !cod) {
+    return "Select at least one payment method (Direct Payment or COD)";
+  }
+  return null;
+}
+
 // GET - Fetch all yatra packages with vehicle info
 export async function GET() {
   try {
@@ -59,6 +96,13 @@ export async function POST(request: NextRequest) {
       image_url,
       is_active,
       display_order,
+      package_type,
+      weekdays,
+      departure_time,
+      arrival_time,
+      seats_total,
+      allow_direct_payment,
+      allow_cod,
     } = body;
 
     if (!vehicle_id || !name || !from_location || !to_location) {
@@ -66,6 +110,20 @@ export async function POST(request: NextRequest) {
         { error: "vehicle_id, name, from_location, and to_location are required" },
         { status: 400 }
       );
+    }
+
+    // Type is set once, at creation. Anything other than "group" is treated as solo.
+    const type = package_type === "group" ? "group" : "solo";
+    if (type === "group") {
+      const groupError = validateGroupFields(body);
+      if (groupError) {
+        return NextResponse.json({ error: groupError }, { status: 400 });
+      }
+    }
+
+    const paymentError = validatePayment(body);
+    if (paymentError) {
+      return NextResponse.json({ error: paymentError }, { status: 400 });
     }
 
     const { data: yatraPackage, error } = await supabase
@@ -87,6 +145,15 @@ export async function POST(request: NextRequest) {
         image_url: image_url || null,
         is_active: is_active ?? true,
         display_order: display_order || 0,
+        package_type: type,
+        // Group-only fields; null/empty for solo so the two types never collide.
+        weekdays: type === "group" ? weekdays : [],
+        departure_time: type === "group" ? departure_time : null,
+        arrival_time: type === "group" ? arrival_time || null : null,
+        seats_total: type === "group" ? seats_total : null,
+        // Payment options apply to both types; default to enabled.
+        allow_direct_payment: allow_direct_payment ?? true,
+        allow_cod: allow_cod ?? true,
       })
       .select()
       .single();
@@ -131,6 +198,12 @@ export async function PUT(request: NextRequest) {
       image_url,
       is_active,
       display_order,
+      weekdays,
+      departure_time,
+      arrival_time,
+      seats_total,
+      allow_direct_payment,
+      allow_cod,
     } = body;
 
     if (!id) {
@@ -138,6 +211,35 @@ export async function PUT(request: NextRequest) {
         { error: "Yatra package ID is required" },
         { status: 400 }
       );
+    }
+
+    // Package type is immutable. Read the existing type from the row and write it
+    // back — any package_type in the request body is intentionally ignored, so a
+    // solo package can never become a group package (or vice versa) via edit.
+    const { data: existing, error: existingError } = await supabase
+      .from("yatra_packages")
+      .select("package_type")
+      .eq("id", id)
+      .single();
+
+    if (existingError || !existing) {
+      return NextResponse.json(
+        { error: "Yatra package not found" },
+        { status: 404 }
+      );
+    }
+    const type = existing.package_type === "group" ? "group" : "solo";
+
+    if (type === "group") {
+      const groupError = validateGroupFields(body);
+      if (groupError) {
+        return NextResponse.json({ error: groupError }, { status: 400 });
+      }
+    }
+
+    const paymentError = validatePayment(body);
+    if (paymentError) {
+      return NextResponse.json({ error: paymentError }, { status: 400 });
     }
 
     const { data: yatraPackage, error } = await supabase
@@ -159,6 +261,13 @@ export async function PUT(request: NextRequest) {
         image_url,
         is_active,
         display_order,
+        // package_type deliberately omitted — never updated.
+        weekdays: type === "group" ? weekdays : [],
+        departure_time: type === "group" ? departure_time : null,
+        arrival_time: type === "group" ? arrival_time || null : null,
+        seats_total: type === "group" ? seats_total : null,
+        allow_direct_payment: allow_direct_payment ?? true,
+        allow_cod: allow_cod ?? true,
         updated_at: new Date().toISOString(),
       })
       .eq("id", id)

@@ -1,6 +1,20 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
 
+// At least one payment method must be enabled.
+// Returns an error string or null. Treats undefined as "keep enabled".
+function validatePayment(body: {
+  allow_direct_payment?: unknown;
+  allow_cod?: unknown;
+}) {
+  const direct = body.allow_direct_payment !== false;
+  const cod = body.allow_cod !== false;
+  if (!direct && !cod) {
+    return "Select at least one payment method (Direct Payment or COD)";
+  }
+  return null;
+}
+
 // GET - Fetch all prasad items with images
 export async function GET() {
   try {
@@ -31,7 +45,7 @@ export async function GET() {
 export async function POST(request: NextRequest) {
   try {
     const body = await request.json();
-    const { temple_id, name, price, quantity, ingredients, in_stock, display_order } = body;
+    const { temple_id, name, price, quantity, ingredients, in_stock, display_order, allow_direct_payment, allow_cod } = body;
 
     // Validate required fields
     if (!temple_id || !name || price === undefined) {
@@ -39,6 +53,11 @@ export async function POST(request: NextRequest) {
         { error: "Temple ID, name, and price are required" },
         { status: 400 }
       );
+    }
+
+    const paymentError = validatePayment(body);
+    if (paymentError) {
+      return NextResponse.json({ error: paymentError }, { status: 400 });
     }
 
     // If display_order is provided and conflicts with existing, reorder
@@ -70,6 +89,8 @@ export async function POST(request: NextRequest) {
         ingredients: ingredients || null,
         in_stock: in_stock ?? true,
         display_order: display_order || 1,
+        allow_direct_payment: allow_direct_payment ?? true,
+        allow_cod: allow_cod ?? true,
       })
       .select("*, temples(name, location)")
       .single();
@@ -96,13 +117,18 @@ export async function POST(request: NextRequest) {
 export async function PUT(request: NextRequest) {
   try {
     const body = await request.json();
-    const { id, temple_id, name, price, quantity, ingredients, image_url, in_stock, display_order } = body;
+    const { id, temple_id, name, price, quantity, ingredients, image_url, in_stock, display_order, allow_direct_payment, allow_cod } = body;
 
     if (!id) {
       return NextResponse.json(
         { error: "Prasad ID is required" },
         { status: 400 }
       );
+    }
+
+    const paymentError = validatePayment(body);
+    if (paymentError) {
+      return NextResponse.json({ error: paymentError }, { status: 400 });
     }
 
     // Get current prasad data
@@ -164,6 +190,8 @@ export async function PUT(request: NextRequest) {
         image_url,
         in_stock,
         display_order,
+        allow_direct_payment: allow_direct_payment ?? true,
+        allow_cod: allow_cod ?? true,
         updated_at: new Date().toISOString(),
       })
       .eq("id", id)

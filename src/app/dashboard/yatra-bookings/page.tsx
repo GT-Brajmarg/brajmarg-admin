@@ -11,16 +11,29 @@ type PaymentStatus =
   | "refunded"
   | "cod_pending";
 
-interface OrderItem {
+interface YatraPackageLite {
+  id: string;
+  name: string;
+  from_location: string;
+  to_location: string;
+  package_type: string;
+  departure_time: string | null;
+  arrival_time: string | null;
+  price: number | null;
+  vehicles?: { name: string; seating_capacity: number } | null;
+}
+
+interface BookingItem {
   id: string;
   order_id: string;
   item_id: string;
-  item_type: string; // prasad | frames | cloths | seva | ...
+  item_type: string;
   quantity: number;
   created_at: string;
+  yatra_package?: YatraPackageLite | null;
 }
 
-interface Order {
+interface Booking {
   id: string;
   order_number: string | null;
   status: OrderStatus;
@@ -33,10 +46,7 @@ interface Order {
   notes: string | null;
   created_at: string;
   updated_at: string;
-  order_items?: OrderItem[];
-  // Delivery columns (present after the delivery_module migration; optional until then).
-  cod_remitted?: boolean | null;
-  refund_status?: string | null;
+  order_items?: BookingItem[];
 }
 
 const STATUS_TABS: { value: "all" | OrderStatus; label: string }[] = [
@@ -76,7 +86,8 @@ const paymentBadge: Record<PaymentStatus, string> = {
 };
 
 function formatDateTime(iso: string) {
-  return new Date(iso).toLocaleString("en-IN", {
+  const d = new Date(iso);
+  return d.toLocaleString("en-IN", {
     day: "2-digit",
     month: "short",
     year: "numeric",
@@ -87,49 +98,51 @@ function formatDateTime(iso: string) {
 
 export default function OrdersPage() {
   const { showToast } = useToast();
-  const [orders, setOrders] = useState<Order[]>([]);
+  const [bookings, setBookings] = useState<Booking[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<"all" | OrderStatus>("all");
-  const [selected, setSelected] = useState<Order | null>(null);
+  const [selected, setSelected] = useState<Booking | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
-  const fetchOrders = async () => {
+  const fetchBookings = async () => {
     try {
       setIsLoading(true);
-      const res = await fetch("/api/orders");
+      const res = await fetch("/api/bookings");
       const data = await res.json();
       if (res.ok) {
-        setOrders(data.orders || []);
+        setBookings(data.bookings || []);
       } else {
-        showToast("error", data.error || "Failed to load orders");
+        showToast("error", data.error || "Failed to load bookings");
       }
     } catch (error) {
-      console.error("Failed to fetch orders:", error);
-      showToast("error", "Failed to load orders");
+      console.error("Failed to fetch bookings:", error);
+      showToast("error", "Failed to load bookings");
     } finally {
       setIsLoading(false);
     }
   };
 
   useEffect(() => {
-    fetchOrders();
+    fetchBookings();
   }, []);
 
   const visible =
-    activeTab === "all" ? orders : orders.filter((o) => o.status === activeTab);
+    activeTab === "all"
+      ? bookings
+      : bookings.filter((b) => b.status === activeTab);
 
   const counts = STATUS_TABS.reduce(
     (acc, t) => {
       acc[t.value] =
         t.value === "all"
-          ? orders.length
-          : orders.filter((o) => o.status === t.value).length;
+          ? bookings.length
+          : bookings.filter((b) => b.status === t.value).length;
       return acc;
     },
     {} as Record<string, number>
   );
 
-  const patchOrder = async (
+  const patchBooking = async (
     body: {
       id: string;
       status?: OrderStatus;
@@ -140,7 +153,7 @@ export default function OrdersPage() {
   ) => {
     setIsSaving(true);
     try {
-      const res = await fetch("/api/orders", {
+      const res = await fetch("/api/bookings", {
         method: "PATCH",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(body),
@@ -151,40 +164,37 @@ export default function OrdersPage() {
         return;
       }
       showToast("success", successMsg);
-      setOrders((prev) =>
-        prev.map((o) => (o.id === body.id ? { ...o, ...data.order } : o))
+      // Update local state from the returned order.
+      setBookings((prev) =>
+        prev.map((b) => (b.id === body.id ? { ...b, ...data.order } : b))
       );
       setSelected((prev) =>
         prev && prev.id === body.id ? { ...prev, ...data.order } : prev
       );
     } catch (error) {
-      console.error("Failed to update order:", error);
+      console.error("Failed to update booking:", error);
       showToast("error", "Update failed");
     } finally {
       setIsSaving(false);
     }
   };
 
-  const handleCancel = (order: Order) => {
-    if (order.status === "cancelled") return;
+  const handleCancel = (booking: Booking) => {
+    if (booking.status === "cancelled") return;
     const reason = window.prompt(
-      "Cancel this order? Optionally add a reason (shown in notes):",
+      "Cancel this booking? Optionally add a reason (shown in notes):",
       ""
     );
+    // prompt returns null if the admin clicked Cancel on the dialog.
     if (reason === null) return;
-    patchOrder(
-      { id: order.id, status: "cancelled", cancellation_reason: reason },
-      "Order cancelled"
+    patchBooking(
+      { id: booking.id, status: "cancelled", cancellation_reason: reason },
+      "Booking cancelled"
     );
   };
 
-  const itemsSummary = (o: Order) => {
-    const items = o.order_items || [];
-    if (items.length === 0) return "—";
-    const totalQty = items.reduce((s, it) => s + (it.quantity || 0), 0);
-    const types = Array.from(new Set(items.map((it) => it.item_type)));
-    return `${items.length} item${items.length === 1 ? "" : "s"} · ${totalQty} qty · ${types.join(", ")}`;
-  };
+  const yatraItemsOf = (b: Booking) =>
+    (b.order_items || []).filter((it) => it.item_type === "yatra");
 
   if (isLoading) {
     return (
@@ -215,11 +225,11 @@ export default function OrdersPage() {
 
   return (
     <div className="space-y-6">
+      {/* Header */}
       <div>
-        <h1 className="text-2xl font-bold text-foreground">Orders</h1>
+        <h1 className="text-2xl font-bold text-foreground">Yatra Bookings</h1>
         <p className="text-sm text-gray-500">
-          Product orders (prasad, frames, cloths, seva) with delivery. Yatra
-          bookings are under Yatra Bookings.
+          View, manage, and cancel customer yatra bookings.
         </p>
       </div>
 
@@ -241,10 +251,11 @@ export default function OrdersPage() {
         ))}
       </div>
 
+      {/* List */}
       {visible.length === 0 ? (
         <div className="rounded-lg bg-card-bg p-8 text-center shadow-sm">
           <p className="text-gray-500">
-            No {activeTab === "all" ? "" : activeTab} orders found.
+            No {activeTab === "all" ? "" : activeTab} yatra bookings found.
           </p>
         </div>
       ) : (
@@ -253,9 +264,9 @@ export default function OrdersPage() {
             <table className="w-full text-left text-sm">
               <thead className="border-b border-gray-200 text-xs uppercase text-gray-500">
                 <tr>
-                  <th className="px-4 py-3">Order</th>
+                  <th className="px-4 py-3">Booking</th>
                   <th className="px-4 py-3">Customer</th>
-                  <th className="px-4 py-3">Items</th>
+                  <th className="px-4 py-3">Yatra</th>
                   <th className="px-4 py-3">Amount</th>
                   <th className="px-4 py-3">Payment</th>
                   <th className="px-4 py-3">Status</th>
@@ -263,82 +274,100 @@ export default function OrdersPage() {
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
-                {visible.map((o) => (
-                  <tr key={o.id} className="hover:bg-gray-50">
-                    <td className="px-4 py-3">
-                      <div className="font-medium text-foreground">
-                        {o.order_number || o.id.slice(0, 8)}
-                      </div>
-                      <div className="text-xs text-gray-400">
-                        {formatDateTime(o.created_at)}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="text-foreground">
-                        {o.customer_name || "—"}
-                      </div>
-                      <div className="text-xs text-gray-400">
-                        {o.customer_phone || o.customer_email || ""}
-                      </div>
-                    </td>
-                    <td className="px-4 py-3 text-gray-600">{itemsSummary(o)}</td>
-                    <td className="px-4 py-3 font-medium text-foreground">
-                      {o.total_amount != null
-                        ? `₹${o.total_amount.toLocaleString()}`
-                        : "—"}
-                    </td>
-                    <td className="px-4 py-3">
-                      <span
-                        className={`rounded-full px-2 py-0.5 text-xs font-medium ${paymentBadge[o.payment_status] || "bg-gray-100 text-gray-600"}`}
-                      >
-                        {o.payment_status}
-                      </span>
-                      {o.payment_method && (
-                        <div className="mt-0.5 text-xs text-gray-400">
-                          {o.payment_method}
+                {visible.map((b) => {
+                  const items = yatraItemsOf(b);
+                  const first = items[0]?.yatra_package;
+                  return (
+                    <tr key={b.id} className="hover:bg-gray-50">
+                      <td className="px-4 py-3">
+                        <div className="font-medium text-foreground">
+                          {b.order_number || b.id.slice(0, 8)}
                         </div>
-                      )}
-                    </td>
-                    <td className="px-4 py-3">
-                      <span
-                        className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusBadge[o.status] || "bg-gray-100 text-gray-600"}`}
-                      >
-                        {o.status}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3">
-                      <div className="flex justify-end gap-2">
-                        <button
-                          onClick={() => setSelected(o)}
-                          className="rounded px-2 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50"
+                        <div className="text-xs text-gray-400">
+                          {formatDateTime(b.created_at)}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="text-foreground">
+                          {b.customer_name || "—"}
+                        </div>
+                        <div className="text-xs text-gray-400">
+                          {b.customer_phone || b.customer_email || ""}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">
+                        {first ? (
+                          <div className="text-foreground">
+                            {first.name}
+                            <div className="text-xs text-gray-400">
+                              {first.from_location} → {first.to_location}
+                              {items.length > 1
+                                ? ` +${items.length - 1} more`
+                                : ""}
+                            </div>
+                          </div>
+                        ) : (
+                          <span className="text-gray-400">Package removed</span>
+                        )}
+                      </td>
+                      <td className="px-4 py-3 font-medium text-foreground">
+                        {b.total_amount != null
+                          ? `₹${b.total_amount.toLocaleString()}`
+                          : "—"}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span
+                          className={`rounded-full px-2 py-0.5 text-xs font-medium ${paymentBadge[b.payment_status] || "bg-gray-100 text-gray-600"}`}
                         >
-                          View
-                        </button>
-                        <button
-                          onClick={() => handleCancel(o)}
-                          disabled={o.status === "cancelled"}
-                          className="rounded px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-40 disabled:hover:bg-transparent"
+                          {b.payment_status}
+                        </span>
+                        {b.payment_method && (
+                          <div className="mt-0.5 text-xs text-gray-400">
+                            {b.payment_method}
+                          </div>
+                        )}
+                      </td>
+                      <td className="px-4 py-3">
+                        <span
+                          className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusBadge[b.status] || "bg-gray-100 text-gray-600"}`}
                         >
-                          Cancel
-                        </button>
-                      </div>
-                    </td>
-                  </tr>
-                ))}
+                          {b.status}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3">
+                        <div className="flex justify-end gap-2">
+                          <button
+                            onClick={() => setSelected(b)}
+                            className="rounded px-2 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50"
+                          >
+                            View
+                          </button>
+                          <button
+                            onClick={() => handleCancel(b)}
+                            disabled={b.status === "cancelled"}
+                            className="rounded px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-40 disabled:hover:bg-transparent"
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>
         </div>
       )}
 
-      {/* Detail modal */}
+      {/* Detail drawer/modal */}
       {selected && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div className="max-h-[90vh] w-full max-w-2xl overflow-hidden rounded-lg bg-card-bg shadow-xl">
             <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
               <div>
                 <h2 className="text-xl font-semibold text-foreground">
-                  Order {selected.order_number || selected.id.slice(0, 8)}
+                  Booking {selected.order_number || selected.id.slice(0, 8)}
                 </h2>
                 <p className="text-xs text-gray-400">
                   Placed {formatDateTime(selected.created_at)}
@@ -390,42 +419,49 @@ export default function OrdersPage() {
                 </div>
               </section>
 
-              {/* Items */}
+              {/* Yatra line items */}
               <section>
                 <h3 className="mb-2 text-sm font-semibold text-gray-500">
-                  Items
+                  Yatra Details
                 </h3>
                 <div className="space-y-2">
-                  {(selected.order_items || []).map((it) => (
+                  {yatraItemsOf(selected).map((it) => (
                     <div
                       key={it.id}
-                      className="flex items-center justify-between rounded-md border border-gray-200 p-3 text-sm"
+                      className="rounded-md border border-gray-200 p-3 text-sm"
                     >
-                      <div>
-                        <span className="rounded bg-gray-100 px-1.5 py-0.5 text-xs font-medium text-gray-600">
-                          {it.item_type}
+                      {it.yatra_package ? (
+                        <>
+                          <div className="font-medium text-foreground">
+                            {it.yatra_package.name}
+                          </div>
+                          <div className="text-xs text-gray-500">
+                            {it.yatra_package.from_location} →{" "}
+                            {it.yatra_package.to_location} ·{" "}
+                            {it.yatra_package.package_type}
+                          </div>
+                          <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500">
+                            <span>Qty / Seats: {it.quantity}</span>
+                            {it.yatra_package.departure_time && (
+                              <span>Dep: {it.yatra_package.departure_time}</span>
+                            )}
+                            {it.yatra_package.arrival_time && (
+                              <span>Arr: {it.yatra_package.arrival_time}</span>
+                            )}
+                            {it.yatra_package.vehicles && (
+                              <span>
+                                Vehicle: {it.yatra_package.vehicles.name}
+                              </span>
+                            )}
+                          </div>
+                        </>
+                      ) : (
+                        <span className="text-gray-400">
+                          Package no longer available (item {it.item_id.slice(0, 8)})
                         </span>
-                        <span className="ml-2 text-gray-500">
-                          item {it.item_id.slice(0, 8)}
-                        </span>
-                      </div>
-                      <span className="text-gray-600">×{it.quantity}</span>
+                      )}
                     </div>
                   ))}
-                  {(selected.order_items || []).length === 0 && (
-                    <p className="text-sm text-gray-400">No line items.</p>
-                  )}
-                </div>
-              </section>
-
-              {/* Delivery / shipments — populated in a later phase (Shiprocket). */}
-              <section>
-                <h3 className="mb-2 text-sm font-semibold text-gray-500">
-                  Delivery
-                </h3>
-                <div className="rounded-md border border-dashed border-gray-300 p-3 text-xs text-gray-400">
-                  Shipment tracking will appear here once the Shiprocket
-                  fulfillment module is enabled.
                 </div>
               </section>
 
@@ -437,13 +473,13 @@ export default function OrdersPage() {
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="mb-1 block text-xs font-medium text-gray-600">
-                      Order Status
+                      Booking Status
                     </label>
                     <select
                       value={selected.status}
                       disabled={isSaving}
                       onChange={(e) =>
-                        patchOrder(
+                        patchBooking(
                           {
                             id: selected.id,
                             status: e.target.value as OrderStatus,
@@ -468,7 +504,7 @@ export default function OrdersPage() {
                       value={selected.payment_status}
                       disabled={isSaving}
                       onChange={(e) =>
-                        patchOrder(
+                        patchBooking(
                           {
                             id: selected.id,
                             payment_status: e.target.value as PaymentStatus,
@@ -488,6 +524,7 @@ export default function OrdersPage() {
                 </div>
               </section>
 
+              {/* Notes */}
               {selected.notes && (
                 <section>
                   <h3 className="mb-2 text-sm font-semibold text-gray-500">
@@ -508,7 +545,7 @@ export default function OrdersPage() {
               >
                 {selected.status === "cancelled"
                   ? "Already cancelled"
-                  : "Cancel order"}
+                  : "Cancel booking"}
               </button>
               <button
                 onClick={() => setSelected(null)}

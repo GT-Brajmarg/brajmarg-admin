@@ -45,11 +45,23 @@ Admin dashboard for managing Brajmarg temple services, offerings, and yatra pack
 - Custom features list
 
 ### Yatra Packages
-- Trip packages linking to vehicles
+- Two package types, chosen on **Add Package** and **fixed for life**:
+  - **Solo** — full private vehicle, available any day, single base price (+ per km).
+  - **Group** — seat-based shared yatra on a weekly recurring schedule, priced per seat.
+- Group packages add a Weekly Schedule & Seat Management section: recurring weekdays
+  (with a "starts on X, runs N days" auto-selector), departure/arrival times, and a
+  per-week seat count (rolling: availability resets each week).
+- Package type cannot be changed after creation (enforced in the API, not just the UI)
+  to prevent pricing/booking conflicts.
 - From/To locations with distance and duration
-- Base price + per km pricing options
-- Inclusions/Exclusions management
-- Itinerary planning
+- Inclusions/Exclusions management and itinerary planning
+
+### Alerts / Notifications
+- Time-bound announcements (festival, closure, darshan, timing, general)
+- Global or temple-specific alerts
+- Priority levels (info, important, urgent)
+- Optional image and CTA link
+- Active status and display order
 
 ## Getting Started
 
@@ -103,7 +115,8 @@ src/
 │   │   ├── frames/
 │   │   ├── cloths/
 │   │   ├── vehicles/
-│   │   └── yatra/
+│   │   ├── yatra/
+│   │   └── alerts/
 │   ├── dashboard/        # Dashboard pages
 │   │   ├── temples/
 │   │   ├── daily-timing/
@@ -112,7 +125,8 @@ src/
 │   │   ├── frames/
 │   │   ├── cloths/
 │   │   ├── vehicles/
-│   │   └── yatra/
+│   │   ├── yatra/
+│   │   └── alerts/
 │   └── page.tsx          # Login page
 ├── components/           # Reusable components
 │   ├── Header.tsx
@@ -130,6 +144,26 @@ src/
 - `brajmarg_cloth_images`
 - `brajmarg_vehicle_images`
 - `brajmarg_yatra_images`
+- `brajmarg_alert_images`
+
+## Database Setup (Alerts)
+
+Run `supabase/alerts.sql` in the Supabase SQL Editor to create the `alerts` table and policies.
+
+## Database Setup (Group Yatra Packages)
+
+Run the **UP** block of `supabase/yatra_group_packages.sql` in the Supabase SQL Editor.
+It adds `package_type` (defaults all existing rows to `solo`) plus the group-only
+scheduling columns to `yatra_packages`. Apply it **before** deploying the matching code.
+The file also contains a commented **DOWN** block for rollback.
+
+## Database Setup (Product Payment Options)
+
+Run the **UP** block of `supabase/product_payment_options.sql` in the Supabase SQL Editor.
+It adds `allow_direct_payment` + `allow_cod` flags (both default `true`) to `cloth_items`,
+`prasad_items`, `frame_items`, and `seva_items`, so the admin can set which payment methods
+each item accepts. The storefront reads these at checkout; order-level payment status lives
+on the `orders` table and is unaffected. Apply **before** deploying the matching code.
 
 ## License
 

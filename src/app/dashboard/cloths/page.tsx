@@ -31,6 +31,8 @@ interface ClothItem {
   image_url: string | null;
   in_stock: boolean;
   display_order: number;
+  allow_direct_payment: boolean;
+  allow_cod: boolean;
   temples?: {
     name: string;
     location: string;
@@ -106,6 +108,8 @@ export default function ClothsPage() {
     colors: [] as string[],
     in_stock: true,
     displayOrder: 1,
+    allow_direct_payment: true,
+    allow_cod: true,
   });
 
   useEffect(() => {
@@ -153,6 +157,8 @@ export default function ClothsPage() {
       colors: [],
       in_stock: true,
       displayOrder: clothItems.length + 1,
+      allow_direct_payment: true,
+      allow_cod: true,
     });
     setCustomColorInput("");
     setPendingImages([]);
@@ -173,6 +179,8 @@ export default function ClothsPage() {
       colors: cloth.colors || [],
       in_stock: cloth.in_stock,
       displayOrder: cloth.display_order,
+      allow_direct_payment: cloth.allow_direct_payment ?? true,
+      allow_cod: cloth.allow_cod ?? true,
     });
     setCustomColorInput("");
     setPendingImages([]);
@@ -281,6 +289,12 @@ export default function ClothsPage() {
   };
 
   const handleFinalSubmit = async () => {
+    // At least one payment method must be enabled.
+    if (!formData.allow_direct_payment && !formData.allow_cod) {
+      showToast("error", "Select at least one payment method");
+      return;
+    }
+
     setIsSaving(true);
     try {
       const temple = temples.find((t) => t.id === formData.temple_id);
@@ -301,6 +315,8 @@ export default function ClothsPage() {
             quantity: formData.quantity,
             in_stock: formData.in_stock,
             display_order: formData.displayOrder,
+            allow_direct_payment: formData.allow_direct_payment,
+            allow_cod: formData.allow_cod,
           }),
         });
 
@@ -331,6 +347,8 @@ export default function ClothsPage() {
             quantity: formData.quantity,
             in_stock: formData.in_stock,
             display_order: formData.displayOrder,
+            allow_direct_payment: formData.allow_direct_payment,
+            allow_cod: formData.allow_cod,
           }),
         });
 
@@ -436,6 +454,9 @@ export default function ClothsPage() {
           quantity: cloth.quantity,
           in_stock: cloth.in_stock,
           display_order: newOrder,
+          // Preserve payment options on reorder.
+          allow_direct_payment: cloth.allow_direct_payment,
+          allow_cod: cloth.allow_cod,
         }),
       });
 
@@ -778,6 +799,19 @@ export default function ClothsPage() {
                     )}
                   </div>
                 )}
+                {/* Payment methods */}
+                <div className="mt-2 flex flex-wrap gap-1">
+                  {cloth.allow_direct_payment && (
+                    <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[11px] font-medium text-gray-600">
+                      Direct Payment
+                    </span>
+                  )}
+                  {cloth.allow_cod && (
+                    <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[11px] font-medium text-gray-600">
+                      COD
+                    </span>
+                  )}
+                </div>
                 <div className="mt-2 flex items-center justify-between">
                   <span className="text-sm text-gray-500">
                     Qty: {cloth.quantity}
@@ -1149,6 +1183,74 @@ export default function ClothsPage() {
                           </span>
                         </label>
                       </div>
+                    </div>
+
+                    {/* Payment Options */}
+                    <div className="space-y-2">
+                      <label className="block text-sm font-medium text-foreground">
+                        Payment Options for Users{" "}
+                        <span className="text-red-500">*</span>
+                      </label>
+                      <div className="grid gap-3 sm:grid-cols-2">
+                        <label
+                          className={`flex cursor-pointer items-start gap-2 rounded-lg border-2 p-3 transition-colors ${
+                            formData.allow_direct_payment
+                              ? "border-brand-red bg-brand-red/5"
+                              : "border-gray-200 hover:border-gray-300"
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={formData.allow_direct_payment}
+                            onChange={(e) =>
+                              setFormData({
+                                ...formData,
+                                allow_direct_payment: e.target.checked,
+                              })
+                            }
+                            className="mt-0.5 h-4 w-4 rounded border-gray-300 text-brand-red focus:ring-brand-red"
+                          />
+                          <span>
+                            <span className="block text-sm font-medium text-foreground">
+                              Direct Payment
+                            </span>
+                            <span className="block text-xs text-gray-500">
+                              Online payments via UPI, Card, Net Banking, etc.
+                            </span>
+                          </span>
+                        </label>
+                        <label
+                          className={`flex cursor-pointer items-start gap-2 rounded-lg border-2 p-3 transition-colors ${
+                            formData.allow_cod
+                              ? "border-brand-red bg-brand-red/5"
+                              : "border-gray-200 hover:border-gray-300"
+                          }`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={formData.allow_cod}
+                            onChange={(e) =>
+                              setFormData({
+                                ...formData,
+                                allow_cod: e.target.checked,
+                              })
+                            }
+                            className="mt-0.5 h-4 w-4 rounded border-gray-300 text-brand-red focus:ring-brand-red"
+                          />
+                          <span>
+                            <span className="block text-sm font-medium text-foreground">
+                              Cash on Delivery (COD)
+                            </span>
+                            <span className="block text-xs text-gray-500">
+                              Cash payment option at the time of delivery.
+                            </span>
+                          </span>
+                        </label>
+                      </div>
+                      <p className="text-xs text-gray-400">
+                        Selected payment methods will be visible to users on the
+                        booking page. At least one is required.
+                      </p>
                     </div>
                   </div>
                 </div>
