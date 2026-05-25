@@ -90,6 +90,7 @@ export default function OrdersPage() {
   const [orders, setOrders] = useState<Order[]>([]);
   const [isLoading, setIsLoading] = useState(true);
   const [activeTab, setActiveTab] = useState<"all" | OrderStatus>("all");
+  const [payFilter, setPayFilter] = useState<"all" | "online" | "cod">("all");
   const [selected, setSelected] = useState<Order | null>(null);
   const [isSaving, setIsSaving] = useState(false);
 
@@ -115,19 +116,47 @@ export default function OrdersPage() {
     fetchOrders();
   }, []);
 
-  const visible =
-    activeTab === "all" ? orders : orders.filter((o) => o.status === activeTab);
+  // COD vs Online. Anything that isn't "cod" is treated as an online payment
+  // (the storefront uses razorpay/upi/card for online). Null/empty -> "online"
+  // so unknown methods aren't hidden from the default Online filter.
+  const isCod = (o: Order) => (o.payment_method || "").toLowerCase() === "cod";
+
+  const visible = orders.filter((o) => {
+    const statusOk = activeTab === "all" || o.status === activeTab;
+    const payOk =
+      payFilter === "all" ||
+      (payFilter === "cod" ? isCod(o) : !isCod(o));
+    return statusOk && payOk;
+  });
 
   const counts = STATUS_TABS.reduce(
     (acc, t) => {
+      // Status counts respect the active payment filter, so the numbers match
+      // what the table shows when a payment filter is applied.
+      const base =
+        payFilter === "all"
+          ? orders
+          : orders.filter((o) => (payFilter === "cod" ? isCod(o) : !isCod(o)));
       acc[t.value] =
         t.value === "all"
-          ? orders.length
-          : orders.filter((o) => o.status === t.value).length;
+          ? base.length
+          : base.filter((o) => o.status === t.value).length;
       return acc;
     },
     {} as Record<string, number>
   );
+
+  const payCounts = {
+    all: orders.length,
+    online: orders.filter((o) => !isCod(o)).length,
+    cod: orders.filter((o) => isCod(o)).length,
+  };
+
+  // Summary strip: revenue across the currently-visible (filtered) orders,
+  // excluding cancelled ones so the figure reflects real expected revenue.
+  const visibleRevenue = visible
+    .filter((o) => o.status !== "cancelled")
+    .reduce((sum, o) => sum + (o.total_amount ?? 0), 0);
 
   const patchOrder = async (
     body: {
@@ -214,110 +243,153 @@ export default function OrdersPage() {
   }
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-bold text-foreground">Orders</h1>
-        <p className="text-sm text-gray-500">
-          Product orders (prasad, frames, cloths, seva) with delivery. Yatra
-          bookings are under Yatra Bookings.
-        </p>
+    <div className="space-y-5">
+      {/* Header + summary strip */}
+      <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <h1 className="text-2xl font-bold text-foreground">Orders</h1>
+          <p className="text-sm text-gray-500">
+            Product orders (prasad, frames, cloths, seva) with delivery. Yatra
+            bookings are under Yatra Bookings.
+          </p>
+        </div>
+        <div className="flex flex-wrap gap-2">
+          <SummaryCard label="Orders" value={String(orders.length)} />
+          <SummaryCard
+            label="Revenue"
+            value={`₹${visibleRevenue.toLocaleString()}`}
+            hint={payFilter === "all" && activeTab === "all" ? "all" : "filtered"}
+          />
+          <SummaryCard label="Online" value={String(payCounts.online)} />
+          <SummaryCard label="COD" value={String(payCounts.cod)} />
+        </div>
       </div>
 
-      {/* Status tabs */}
-      <div className="flex flex-wrap gap-2">
-        {STATUS_TABS.map((tab) => (
-          <button
-            key={tab.value}
-            onClick={() => setActiveTab(tab.value)}
-            className={`rounded-full px-3 py-1.5 text-sm font-medium transition-colors ${
-              activeTab === tab.value
-                ? "bg-brand-red text-white"
-                : "bg-card-bg text-gray-600 ring-1 ring-gray-200 hover:bg-gray-50"
-            }`}
-          >
-            {tab.label}
-            <span className="ml-1.5 opacity-70">({counts[tab.value] ?? 0})</span>
-          </button>
-        ))}
+      {/* Filters card */}
+      <div className="space-y-3 rounded-xl bg-card-bg p-4 shadow-sm ring-1 ring-gray-100">
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="w-16 text-xs font-semibold uppercase tracking-wide text-gray-400">
+            Status
+          </span>
+          {STATUS_TABS.map((tab) => (
+            <button
+              key={tab.value}
+              onClick={() => setActiveTab(tab.value)}
+              className={`rounded-full px-3 py-1.5 text-sm font-medium transition-colors ${
+                activeTab === tab.value
+                  ? "bg-brand-red text-white shadow-sm"
+                  : "bg-gray-50 text-gray-600 ring-1 ring-gray-200 hover:bg-gray-100"
+              }`}
+            >
+              {tab.label}
+              <span className="ml-1.5 opacity-70">({counts[tab.value] ?? 0})</span>
+            </button>
+          ))}
+        </div>
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="w-16 text-xs font-semibold uppercase tracking-wide text-gray-400">
+            Payment
+          </span>
+          {(
+            [
+              { value: "all", label: "All" },
+              { value: "online", label: "Online Payment" },
+              { value: "cod", label: "Cash on Delivery" },
+            ] as const
+          ).map((p) => (
+            <button
+              key={p.value}
+              onClick={() => setPayFilter(p.value)}
+              className={`rounded-full px-3 py-1.5 text-sm font-medium transition-colors ${
+                payFilter === p.value
+                  ? "bg-blue-600 text-white shadow-sm"
+                  : "bg-gray-50 text-gray-600 ring-1 ring-gray-200 hover:bg-gray-100"
+              }`}
+            >
+              {p.label}
+              <span className="ml-1.5 opacity-70">({payCounts[p.value]})</span>
+            </button>
+          ))}
+        </div>
       </div>
 
       {visible.length === 0 ? (
-        <div className="rounded-lg bg-card-bg p-8 text-center shadow-sm">
-          <p className="text-gray-500">
-            No {activeTab === "all" ? "" : activeTab} orders found.
-          </p>
+        <div className="rounded-xl bg-card-bg p-12 text-center shadow-sm ring-1 ring-gray-100">
+          <svg
+            xmlns="http://www.w3.org/2000/svg"
+            fill="none"
+            viewBox="0 0 24 24"
+            strokeWidth={1.3}
+            stroke="currentColor"
+            className="mx-auto h-12 w-12 text-gray-300"
+          >
+            <path
+              strokeLinecap="round"
+              strokeLinejoin="round"
+              d="m20.25 7.5-.625 10.632a2.25 2.25 0 0 1-2.247 2.118H6.622a2.25 2.25 0 0 1-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125Z"
+            />
+          </svg>
+          <p className="mt-3 text-sm font-medium text-gray-500">No orders match these filters.</p>
+          <p className="mt-1 text-xs text-gray-400">Try switching the status or payment filter above.</p>
         </div>
       ) : (
-        <div className="overflow-hidden rounded-lg bg-card-bg shadow-sm">
+        <div className="overflow-hidden rounded-xl bg-card-bg shadow-sm ring-1 ring-gray-100">
           <div className="overflow-x-auto">
             <table className="w-full text-left text-sm">
-              <thead className="border-b border-gray-200 text-xs uppercase text-gray-500">
+              <thead className="sticky top-0 z-10 bg-gray-50 text-xs font-semibold uppercase tracking-wide text-gray-500">
                 <tr>
-                  <th className="px-4 py-3">Order</th>
-                  <th className="px-4 py-3">Customer</th>
-                  <th className="px-4 py-3">Items</th>
-                  <th className="px-4 py-3">Amount</th>
-                  <th className="px-4 py-3">Payment</th>
-                  <th className="px-4 py-3">Status</th>
-                  <th className="px-4 py-3 text-right">Actions</th>
+                  <th className="px-5 py-3">Order</th>
+                  <th className="px-5 py-3">Customer</th>
+                  <th className="px-5 py-3">Items</th>
+                  <th className="px-5 py-3 text-right">Amount</th>
+                  <th className="px-5 py-3">Payment</th>
+                  <th className="px-5 py-3">Status</th>
+                  <th className="px-5 py-3 text-right">Actions</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {visible.map((o) => (
-                  <tr key={o.id} className="hover:bg-gray-50">
-                    <td className="px-4 py-3">
-                      <div className="font-medium text-foreground">
+                  <tr key={o.id} className="transition-colors hover:bg-brand-red/[0.03]">
+                    <td className="px-5 py-4">
+                      <div className="font-semibold text-foreground">
                         {o.order_number || o.id.slice(0, 8)}
                       </div>
-                      <div className="text-xs text-gray-400">
+                      <div className="mt-0.5 text-xs text-gray-400">
                         {formatDateTime(o.created_at)}
                       </div>
                     </td>
-                    <td className="px-4 py-3">
-                      <div className="text-foreground">
+                    <td className="px-5 py-4">
+                      <div className="font-medium text-foreground">
                         {o.customer_name || "—"}
                       </div>
                       <div className="text-xs text-gray-400">
                         {o.customer_phone || o.customer_email || ""}
                       </div>
                     </td>
-                    <td className="px-4 py-3 text-gray-600">{itemsSummary(o)}</td>
-                    <td className="px-4 py-3 font-medium text-foreground">
+                    <td className="px-5 py-4 text-gray-600">{itemsSummary(o)}</td>
+                    <td className="px-5 py-4 text-right font-semibold text-foreground">
                       {o.total_amount != null
                         ? `₹${o.total_amount.toLocaleString()}`
                         : "—"}
                     </td>
-                    <td className="px-4 py-3">
-                      <span
-                        className={`rounded-full px-2 py-0.5 text-xs font-medium ${paymentBadge[o.payment_status] || "bg-gray-100 text-gray-600"}`}
-                      >
-                        {o.payment_status}
-                      </span>
-                      {o.payment_method && (
-                        <div className="mt-0.5 text-xs text-gray-400">
-                          {o.payment_method}
-                        </div>
-                      )}
+                    <td className="px-5 py-4">
+                      <PaymentCell order={o} isCod={isCod(o)} />
                     </td>
-                    <td className="px-4 py-3">
-                      <span
-                        className={`rounded-full px-2 py-0.5 text-xs font-medium ${statusBadge[o.status] || "bg-gray-100 text-gray-600"}`}
-                      >
-                        {o.status}
-                      </span>
+                    <td className="px-5 py-4">
+                      <StatusBadge status={o.status} />
                     </td>
-                    <td className="px-4 py-3">
-                      <div className="flex justify-end gap-2">
+                    <td className="px-5 py-4">
+                      <div className="flex justify-end gap-1.5">
                         <button
                           onClick={() => setSelected(o)}
-                          className="rounded px-2 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50"
+                          className="rounded-md px-2.5 py-1 text-xs font-medium text-blue-600 ring-1 ring-blue-200 transition-colors hover:bg-blue-50"
                         >
                           View
                         </button>
                         <button
                           onClick={() => handleCancel(o)}
                           disabled={o.status === "cancelled"}
-                          className="rounded px-2 py-1 text-xs font-medium text-red-600 hover:bg-red-50 disabled:opacity-40 disabled:hover:bg-transparent"
+                          className="rounded-md px-2.5 py-1 text-xs font-medium text-red-600 ring-1 ring-red-200 transition-colors hover:bg-red-50 disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:bg-transparent"
                         >
                           Cancel
                         </button>
@@ -530,5 +602,67 @@ function Detail({ label, value }: { label: string; value: string | null }) {
       <div className="text-xs text-gray-400">{label}</div>
       <div className="text-foreground">{value || "—"}</div>
     </div>
+  );
+}
+
+// A compact stat tile for the header summary strip.
+function SummaryCard({
+  label,
+  value,
+  hint,
+}: {
+  label: string;
+  value: string;
+  hint?: string;
+}) {
+  return (
+    <div className="min-w-[88px] rounded-lg bg-card-bg px-3 py-2 text-center shadow-sm ring-1 ring-gray-100">
+      <div className="text-lg font-bold leading-tight text-foreground">
+        {value}
+      </div>
+      <div className="text-[11px] uppercase tracking-wide text-gray-400">
+        {label}
+        {hint ? ` · ${hint}` : ""}
+      </div>
+    </div>
+  );
+}
+
+// Payment cell: method (Online / COD) on top, payment_status badge below.
+function PaymentCell({
+  order,
+  isCod,
+}: {
+  order: { payment_method: string | null; payment_status: PaymentStatus };
+  isCod: boolean;
+}) {
+  return (
+    <div className="space-y-1">
+      <span
+        className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${
+          isCod ? "bg-orange-100 text-orange-700" : "bg-indigo-100 text-indigo-700"
+        }`}
+      >
+        {isCod ? "COD" : "Online"}
+      </span>
+      <div>
+        <span
+          className={`rounded-full px-2 py-0.5 text-[11px] font-medium ${paymentBadge[order.payment_status] || "bg-gray-100 text-gray-600"}`}
+        >
+          {order.payment_status}
+        </span>
+      </div>
+    </div>
+  );
+}
+
+function StatusBadge({ status }: { status: OrderStatus }) {
+  return (
+    <span
+      className={`inline-flex items-center gap-1 rounded-full px-2.5 py-0.5 text-xs font-medium capitalize ${statusBadge[status] || "bg-gray-100 text-gray-600"}`}
+    >
+      <span className="h-1.5 w-1.5 rounded-full bg-current opacity-70" />
+      {status}
+    </span>
   );
 }

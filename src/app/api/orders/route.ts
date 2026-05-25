@@ -1,5 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
-import { supabase } from "@/lib/supabase";
+import { createServiceClient } from "@/lib/supabase-admin";
+
+// Service-role client: the `orders` table is RLS-protected to its owning user,
+// so the anon/publishable key returns ZERO rows here (no logged-in Supabase user
+// in an API route). The service role bypasses RLS so the admin can list and
+// manage every order. Server-only — mirrors /api/bookings.
+const supabase = createServiceClient();
 
 // Physical / product orders are identified by the "BRJ-" order_number prefix
 // (the storefront uses "YTR-" for yatra bookings — see /api/bookings). This is the
@@ -14,6 +20,11 @@ type OrderStatus = (typeof ORDER_STATUSES)[number];
 // and after the delivery_module migration (extra columns simply ride along).
 export async function GET(request: NextRequest) {
   try {
+    if (!supabase) {
+      console.error("orders GET: SUPABASE_SERVICE_ROLE_KEY not configured");
+      return NextResponse.json({ error: "Server not configured" }, { status: 500 });
+    }
+
     const { searchParams } = new URL(request.url);
     const statusFilter = searchParams.get("status");
 
@@ -64,6 +75,11 @@ export async function GET(request: NextRequest) {
 // service-role routes in later phases; this is the basic order-state update.
 export async function PATCH(request: NextRequest) {
   try {
+    if (!supabase) {
+      console.error("orders PATCH: SUPABASE_SERVICE_ROLE_KEY not configured");
+      return NextResponse.json({ error: "Server not configured" }, { status: 500 });
+    }
+
     const body = await request.json();
     const { id, status, payment_status, cancellation_reason } = body;
 

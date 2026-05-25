@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { supabase } from "@/lib/supabase";
+import { createServiceClient } from "@/lib/supabase-admin";
 
 // POST - Upload alert image
 export async function POST(request: NextRequest) {
@@ -16,13 +17,19 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // Storage writes need the service-role client: the publishable/anon key is
+    // blocked by storage RLS on the brajmarg_alert_images bucket (insert denied).
+    // Server-side only — never exposed to the browser. Falls back to the anon
+    // client if the key isn't configured (will still fail RLS, but explicitly).
+    const db = createServiceClient() ?? supabase;
+
     const fileExt = file.name.split(".").pop();
     const fileName = `${alertTitle.replace(/[^a-zA-Z0-9]/g, "_")}/${Date.now()}.${fileExt}`;
 
     const arrayBuffer = await file.arrayBuffer();
     const buffer = new Uint8Array(arrayBuffer);
 
-    const { error: uploadError } = await supabase.storage
+    const { error: uploadError } = await db.storage
       .from("brajmarg_alert_images")
       .upload(fileName, buffer, {
         contentType: file.type,
@@ -39,11 +46,11 @@ export async function POST(request: NextRequest) {
 
     const {
       data: { publicUrl },
-    } = supabase.storage.from("brajmarg_alert_images").getPublicUrl(fileName);
+    } = db.storage.from("brajmarg_alert_images").getPublicUrl(fileName);
 
     const imageUrl = `${publicUrl}?t=${Date.now()}`;
 
-    const { error: updateError } = await supabase
+    const { error: updateError } = await db
       .from("alerts")
       .update({ image_url: imageUrl, updated_at: new Date().toISOString() })
       .eq("id", alertId);
@@ -79,7 +86,9 @@ export async function DELETE(request: NextRequest) {
       );
     }
 
-    const { data: alert } = await supabase
+    const db = createServiceClient() ?? supabase;
+
+    const { data: alert } = await db
       .from("alerts")
       .select("image_url")
       .eq("id", alertId)
@@ -89,11 +98,11 @@ export async function DELETE(request: NextRequest) {
       const urlParts = alert.image_url.split("/brajmarg_alert_images/");
       if (urlParts[1]) {
         const path = urlParts[1].split("?")[0];
-        await supabase.storage.from("brajmarg_alert_images").remove([path]);
+        await db.storage.from("brajmarg_alert_images").remove([path]);
       }
     }
 
-    const { error } = await supabase
+    const { error } = await db
       .from("alerts")
       .update({ image_url: null, updated_at: new Date().toISOString() })
       .eq("id", alertId);

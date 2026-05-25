@@ -468,14 +468,29 @@ export default function AlertsPage() {
                     className="border-b border-gray-100 hover:bg-gray-50"
                   >
                     <td className="px-4 py-4">
-                      <div className="font-medium text-foreground">
-                        {alert.title}
+                      <div className="flex items-center gap-3">
+                        {alert.image_url && (
+                          <div className="relative h-10 w-10 flex-shrink-0 overflow-hidden rounded">
+                            <Image
+                              src={alert.image_url}
+                              alt={alert.title}
+                              fill
+                              className="object-cover"
+                              unoptimized
+                            />
+                          </div>
+                        )}
+                        <div>
+                          <div className="font-medium text-foreground">
+                            {alert.title}
+                          </div>
+                          {isAlertLive(alert) && (
+                            <span className="mt-1 inline-flex rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800">
+                              Live now
+                            </span>
+                          )}
+                        </div>
                       </div>
-                      {isAlertLive(alert) && (
-                        <span className="mt-1 inline-flex rounded-full bg-green-100 px-2 py-0.5 text-xs font-medium text-green-800">
-                          Live now
-                        </span>
-                      )}
                     </td>
                     <td className="px-4 py-4">
                       <span
@@ -835,18 +850,54 @@ export default function AlertsPage() {
                     className="hidden"
                   />
                   {pendingImage ? (
-                    <p className="text-sm text-gray-600">
-                      Selected: {pendingImage.name}
-                    </p>
+                    <div
+                      className="flex flex-col items-center gap-2"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {/* Preview the just-selected file before it's uploaded. */}
+                      <div className="relative h-32 w-full max-w-xs">
+                        <Image
+                          src={URL.createObjectURL(pendingImage)}
+                          alt="Selected preview"
+                          fill
+                          className="rounded object-contain"
+                          unoptimized
+                        />
+                      </div>
+                      <div className="flex items-center gap-3">
+                        <span className="max-w-[14rem] truncate text-xs text-gray-500">
+                          {pendingImage.name}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setPendingImage(null)}
+                          className="rounded px-2 py-0.5 text-xs font-medium text-red-600 hover:bg-red-50"
+                        >
+                          Remove
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => fileInputRef.current?.click()}
+                          className="rounded px-2 py-0.5 text-xs font-medium text-brand-red hover:bg-red-50"
+                        >
+                          Change
+                        </button>
+                      </div>
+                    </div>
                   ) : editingAlert?.image_url ? (
-                    <div className="relative h-24 w-full max-w-xs">
-                      <Image
-                        src={editingAlert.image_url}
-                        alt="Alert"
-                        fill
-                        className="rounded object-cover"
-                        unoptimized
-                      />
+                    <div className="flex flex-col items-center gap-1">
+                      <div className="relative h-24 w-full max-w-xs">
+                        <Image
+                          src={editingAlert.image_url}
+                          alt="Alert"
+                          fill
+                          className="rounded object-cover"
+                          unoptimized
+                        />
+                      </div>
+                      <span className="text-xs text-gray-400">
+                        Current image — click to replace
+                      </span>
                     </div>
                   ) : (
                     <>
