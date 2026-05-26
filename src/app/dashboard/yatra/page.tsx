@@ -13,6 +13,8 @@ interface Vehicle {
   is_ac: boolean;
 }
 
+type PackageType = "solo" | "group";
+
 interface YatraPackage {
   id: string;
   vehicle_id: string;
@@ -31,7 +33,33 @@ interface YatraPackage {
   image_url: string | null;
   is_active: boolean;
   display_order: number;
+  package_type: PackageType;
+  weekdays: number[];
+  departure_time: string | null;
+  arrival_time: string | null;
+  seats_total: number | null;
+  allow_direct_payment: boolean;
+  allow_cod: boolean;
   vehicles?: Vehicle;
+}
+
+const WEEKDAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+// A group yatra runs on consecutive days. The schedule is derived from a single
+// start day + the trip duration (max 7), so it can never be non-continuous
+// (e.g. Mon+Fri). start=Mon(1), count=2 -> [1,2]; start=Sat(6), count=3 -> [6,0,1].
+function consecutiveWeekdays(start: number, count: number): number[] {
+  const n = Math.min(Math.max(count, 1), 7); // clamp 1..7 (weekly schedule)
+  return Array.from({ length: n }, (_, i) => (start + i) % 7);
+}
+
+// Recover the start day of an existing (already-consecutive) schedule for editing.
+function scheduleStartOf(weekdays: number[]): number {
+  if (!weekdays || weekdays.length === 0) return 1; // default Mon
+  // The start is the day whose predecessor is NOT in the set (handles week wrap).
+  const set = new Set(weekdays);
+  const start = weekdays.find((d) => !set.has((d + 6) % 7));
+  return start ?? weekdays[0];
 }
 
 export default function YatraPage() {
@@ -43,7 +71,13 @@ export default function YatraPage() {
   const [isSaving, setIsSaving] = useState(false);
   const [isUploading, setIsUploading] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  // Step 1 of "Add": choose the package type before the form opens.
+  const [isTypeSelectOpen, setIsTypeSelectOpen] = useState(false);
   const [editingPackage, setEditingPackage] = useState<YatraPackage | null>(null);
+
+  // Group schedule start day (0=Sun..6=Sat). The recurring weekdays are derived
+  // from this + duration_days, so the schedule is always consecutive.
+  const [scheduleStartDay, setScheduleStartDay] = useState(1); // Mon
 
   // For single image upload
   const [pendingImage, setPendingImage] = useState<File | null>(null);
@@ -70,12 +104,36 @@ export default function YatraPage() {
     itinerary: "",
     is_active: true,
     displayOrder: 1,
+    // Type is fixed once the form opens (chosen in the type-select step, or read
+    // from the package being edited). Never editable in the form itself.
+    package_type: "solo" as PackageType,
+    weekdays: [] as number[],
+    departure_time: "",
+    arrival_time: "",
+    seats_total: 0,
+    allow_direct_payment: true,
+    allow_cod: true,
   });
 
   useEffect(() => {
     fetchVehicles();
     fetchYatraPackages();
   }, []);
+
+  // Keep the group schedule consecutive: whenever the start day or trip duration
+  // changes, derive weekdays = N consecutive days from the start day. This makes
+  // non-continuous schedules (e.g. Mon + Fri) impossible by construction.
+  useEffect(() => {
+    if (!isModalOpen || formData.package_type !== "group") return;
+    const count = Math.min(Math.max(formData.duration_days || 1, 1), 7);
+    const next = consecutiveWeekdays(scheduleStartDay, count);
+    setFormData((prev) => {
+      const same =
+        prev.weekdays.length === next.length &&
+        prev.weekdays.every((d, i) => d === next[i]);
+      return same ? prev : { ...prev, weekdays: next };
+    });
+  }, [scheduleStartDay, formData.duration_days, formData.package_type, isModalOpen]);
 
   const fetchVehicles = async () => {
     try {
@@ -106,16 +164,26 @@ export default function YatraPage() {
     }
   };
 
-  const openAddModal = () => {
+  // Step 1: clicking "Add Package" opens the type chooser first.
+  const openTypeSelect = () => {
     setEditingPackage(null);
+    setIsTypeSelectOpen(true);
+  };
+
+  // Step 2: a type is chosen -> open the form pre-set to that (now fixed) type.
+  const openFormForType = (type: PackageType) => {
+    setEditingPackage(null);
+    // Group default: 2-day trip from Monday -> weekdays derived to [Mon, Tue].
+    const days = type === "group" ? 2 : 0;
+    setScheduleStartDay(1); // Mon
     setFormData({
       vehicle_id: vehicles.length > 0 ? vehicles[0].id : "",
       name: "",
       from_location: "",
       to_location: "",
       distance_km: 0,
-      duration_days: 0,
-      duration_nights: 0,
+      duration_days: days,
+      duration_nights: days > 0 ? days - 1 : 0,
       price: 0,
       price_per_km: 0,
       route_description: "",
@@ -124,15 +192,25 @@ export default function YatraPage() {
       itinerary: "",
       is_active: true,
       displayOrder: yatraPackages.length + 1,
+      package_type: type,
+      weekdays: type === "group" ? consecutiveWeekdays(1, days) : [],
+      departure_time: "",
+      arrival_time: "",
+      seats_total: 0,
+      allow_direct_payment: true,
+      allow_cod: true,
     });
     setCustomInclusionInput("");
     setCustomExclusionInput("");
     setPendingImage(null);
+    setIsTypeSelectOpen(false);
     setIsModalOpen(true);
   };
 
   const openEditModal = (pkg: YatraPackage) => {
     setEditingPackage(pkg);
+    // Recover the start day from the saved consecutive schedule for the picker.
+    setScheduleStartDay(scheduleStartOf(pkg.weekdays || []));
     setFormData({
       vehicle_id: pkg.vehicle_id,
       name: pkg.name,
@@ -149,6 +227,14 @@ export default function YatraPage() {
       itinerary: pkg.itinerary || "",
       is_active: pkg.is_active,
       displayOrder: pkg.display_order,
+      // Type comes from the existing package and cannot be changed here.
+      package_type: pkg.package_type || "solo",
+      weekdays: pkg.weekdays || [],
+      departure_time: pkg.departure_time || "",
+      arrival_time: pkg.arrival_time || "",
+      seats_total: pkg.seats_total || 0,
+      allow_direct_payment: pkg.allow_direct_payment ?? true,
+      allow_cod: pkg.allow_cod ?? true,
     });
     setCustomInclusionInput("");
     setCustomExclusionInput("");
@@ -160,6 +246,23 @@ export default function YatraPage() {
     setIsModalOpen(false);
     setEditingPackage(null);
     setPendingImage(null);
+  };
+
+  // Clicking a weekday sets it as the START day; the schedule (consecutive days)
+  // is re-derived from it + duration by the effect above. No free multi-select.
+  const selectStartDay = (day: number) => {
+    setScheduleStartDay(day);
+  };
+
+  // Days drive nights automatically (nights = days - 1) and are capped at 7 to fit
+  // a weekly schedule. The group weekday derivation reacts to duration_days.
+  const handleDaysChange = (raw: number) => {
+    const days = Math.min(Math.max(raw || 0, 0), 7);
+    setFormData((prev) => ({
+      ...prev,
+      duration_days: days,
+      duration_nights: days > 0 ? days - 1 : 0,
+    }));
   };
 
   const addInclusion = () => {
@@ -248,6 +351,47 @@ export default function YatraPage() {
       showToast("error", "Please enter to location");
       return;
     }
+    if (formData.package_type === "group") {
+      if (!formData.duration_days || formData.duration_days < 1) {
+        showToast("error", "Set the trip duration (Days) for the group schedule");
+        return;
+      }
+      if (formData.weekdays.length === 0) {
+        showToast("error", "Select at least one recurring day for the group schedule");
+        return;
+      }
+      if (!formData.departure_time) {
+        showToast("error", "Please set a departure time");
+        return;
+      }
+      if (!formData.seats_total || formData.seats_total < 1) {
+        showToast("error", "Please set the number of seats available");
+        return;
+      }
+    }
+
+    // Payment options apply to both types; at least one must be enabled.
+    if (!formData.allow_direct_payment && !formData.allow_cod) {
+      showToast("error", "Select at least one payment method");
+      return;
+    }
+
+    // Group-only fields, sent only for group packages.
+    const groupFields =
+      formData.package_type === "group"
+        ? {
+            weekdays: formData.weekdays,
+            departure_time: formData.departure_time,
+            arrival_time: formData.arrival_time || null,
+            seats_total: formData.seats_total,
+          }
+        : {};
+
+    // Payment fields sent on every request, both create and update.
+    const paymentFields = {
+      allow_direct_payment: formData.allow_direct_payment,
+      allow_cod: formData.allow_cod,
+    };
 
     setIsSaving(true);
     try {
@@ -274,6 +418,8 @@ export default function YatraPage() {
             image_url: editingPackage.image_url,
             is_active: formData.is_active,
             display_order: formData.displayOrder,
+            ...groupFields,
+            ...paymentFields,
           }),
         });
 
@@ -310,6 +456,9 @@ export default function YatraPage() {
             itinerary: formData.itinerary || null,
             is_active: formData.is_active,
             display_order: formData.displayOrder,
+            package_type: formData.package_type,
+            ...groupFields,
+            ...paymentFields,
           }),
         });
 
@@ -414,6 +563,14 @@ export default function YatraPage() {
           image_url: pkg.image_url,
           is_active: pkg.is_active,
           display_order: newOrder,
+          // Preserve group schedule on reorder (server keeps the type fixed).
+          weekdays: pkg.weekdays,
+          departure_time: pkg.departure_time,
+          arrival_time: pkg.arrival_time,
+          seats_total: pkg.seats_total,
+          // Preserve payment options too.
+          allow_direct_payment: pkg.allow_direct_payment,
+          allow_cod: pkg.allow_cod,
         }),
       });
 
@@ -448,6 +605,14 @@ export default function YatraPage() {
           image_url: pkg.image_url,
           is_active: !pkg.is_active,
           display_order: pkg.display_order,
+          // Preserve group schedule on activate/deactivate.
+          weekdays: pkg.weekdays,
+          departure_time: pkg.departure_time,
+          arrival_time: pkg.arrival_time,
+          seats_total: pkg.seats_total,
+          // Preserve payment options too.
+          allow_direct_payment: pkg.allow_direct_payment,
+          allow_cod: pkg.allow_cod,
         }),
       });
 
@@ -539,7 +704,7 @@ export default function YatraPage() {
           </p>
         </div>
         <button
-          onClick={openAddModal}
+          onClick={openTypeSelect}
           className="flex items-center gap-2 rounded-lg bg-brand-red px-4 py-2 font-medium text-white transition-colors hover:bg-brand-red-dark"
         >
           <svg
@@ -668,10 +833,33 @@ export default function YatraPage() {
 
               {/* Content */}
               <div className="p-4">
+                {/* Package type badge */}
+                <div className="mb-1.5 flex flex-wrap items-center gap-1.5">
+                  {pkg.package_type === "group" ? (
+                    <>
+                      <span className="rounded bg-blue-600 px-2 py-0.5 text-xs font-semibold text-white">
+                        Shared Yatra
+                      </span>
+                      <span className="rounded bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">
+                        Seat Booking
+                      </span>
+                    </>
+                  ) : (
+                    <>
+                      <span className="rounded bg-brand-red px-2 py-0.5 text-xs font-semibold text-white">
+                        Private Vehicle
+                      </span>
+                      <span className="rounded bg-brand-red/10 px-2 py-0.5 text-xs font-medium text-brand-red">
+                        Full Package
+                      </span>
+                    </>
+                  )}
+                </div>
+
                 {/* Vehicle info */}
                 {pkg.vehicles && (
                   <div className="mb-1 flex items-center gap-2">
-                    <span className="rounded bg-blue-100 px-2 py-0.5 text-xs font-medium text-blue-700">
+                    <span className="rounded bg-gray-100 px-2 py-0.5 text-xs font-medium text-gray-700">
                       {pkg.vehicles.name}
                     </span>
                     <span className="text-xs text-gray-500">
@@ -722,17 +910,74 @@ export default function YatraPage() {
                   )}
                 </div>
 
-                {/* Price */}
+                {/* Schedule / availability — differs by type */}
+                {pkg.package_type === "group" ? (
+                  <div className="mt-2 space-y-1">
+                    <p className="text-xs font-medium text-gray-700">
+                      Runs On:{" "}
+                      <span className="text-blue-700">
+                        {(pkg.weekdays && pkg.weekdays.length > 0
+                          ? pkg.weekdays.map((d) => WEEKDAY_LABELS[d])
+                          : ["—"]
+                        ).join(" · ")}
+                      </span>
+                    </p>
+                    {pkg.seats_total !== null && (
+                      <p className="text-xs text-gray-600">
+                        {pkg.seats_total} Seats Available
+                        {pkg.departure_time ? ` · Dep ${pkg.departure_time}` : ""}
+                      </p>
+                    )}
+                  </div>
+                ) : (
+                  <p className="mt-2 text-xs font-medium text-green-700">
+                    Available Any Day
+                  </p>
+                )}
+
+                {/* Price — per seat for group, base (+per km) for solo */}
                 <div className="mt-2">
                   {pkg.price !== null && pkg.price > 0 && (
                     <p className="text-lg font-bold text-brand-red">
                       ₹{pkg.price.toLocaleString()}
+                      {pkg.package_type === "group" && (
+                        <span className="text-sm font-medium text-gray-500">
+                          {" "}
+                          / Seat
+                        </span>
+                      )}
                     </p>
                   )}
-                  {pkg.price_per_km !== null && pkg.price_per_km > 0 && (
-                    <p className="text-sm text-gray-600">
-                      + ₹{pkg.price_per_km}/km
-                    </p>
+                  {pkg.package_type === "solo" &&
+                    pkg.price_per_km !== null &&
+                    pkg.price_per_km > 0 && (
+                      <p className="text-sm text-gray-600">
+                        + ₹{pkg.price_per_km}/km
+                      </p>
+                    )}
+                  {pkg.package_type === "group" &&
+                    pkg.price !== null &&
+                    pkg.price > 0 &&
+                    pkg.seats_total !== null &&
+                    pkg.seats_total > 0 && (
+                      <p className="text-xs text-gray-500">
+                        Total ₹{(pkg.price * pkg.seats_total).toLocaleString()} (
+                        {pkg.seats_total} seats)
+                      </p>
+                    )}
+                </div>
+
+                {/* Payment methods */}
+                <div className="mt-2 flex flex-wrap gap-1">
+                  {pkg.allow_direct_payment && (
+                    <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[11px] font-medium text-gray-600">
+                      Direct Payment
+                    </span>
+                  )}
+                  {pkg.allow_cod && (
+                    <span className="rounded bg-gray-100 px-1.5 py-0.5 text-[11px] font-medium text-gray-600">
+                      COD
+                    </span>
                   )}
                 </div>
 
@@ -797,15 +1042,113 @@ export default function YatraPage() {
         </div>
       )}
 
+      {/* Step 1 — Package Type Selection Modal */}
+      {isTypeSelectOpen && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
+          <div className="w-full max-w-2xl rounded-lg bg-card-bg shadow-xl">
+            <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
+              <h2 className="text-xl font-semibold text-foreground">
+                What do you want to create?
+              </h2>
+              <button
+                onClick={() => setIsTypeSelectOpen(false)}
+                className="rounded p-1 text-gray-500 hover:bg-gray-100"
+                aria-label="Close"
+              >
+                <svg
+                  xmlns="http://www.w3.org/2000/svg"
+                  fill="none"
+                  viewBox="0 0 24 24"
+                  strokeWidth={2}
+                  stroke="currentColor"
+                  className="h-5 w-5"
+                >
+                  <path
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                    d="M6 18 18 6M6 6l12 12"
+                  />
+                </svg>
+              </button>
+            </div>
+            <div className="grid gap-4 p-6 sm:grid-cols-2">
+              {/* Solo */}
+              <button
+                onClick={() => openFormForType("solo")}
+                className="flex flex-col rounded-lg border-2 border-gray-200 p-5 text-left transition-colors hover:border-brand-red hover:bg-brand-red/5"
+              >
+                <span className="inline-flex w-fit rounded-full bg-brand-red/10 px-2.5 py-0.5 text-xs font-semibold text-brand-red">
+                  Solo Package
+                </span>
+                <h3 className="mt-3 text-lg font-semibold text-foreground">
+                  Private Vehicle (Full Package)
+                </h3>
+                <p className="mt-1 text-sm text-gray-500">
+                  Book an entire vehicle for a private group. Available any day.
+                </p>
+                <ul className="mt-3 space-y-1 text-xs text-gray-600">
+                  <li>• Full vehicle booking</li>
+                  <li>• No seat management</li>
+                  <li>• One fixed package price</li>
+                </ul>
+                <span className="mt-4 inline-flex w-fit items-center gap-1 rounded-md bg-brand-red px-3 py-1.5 text-sm font-medium text-white">
+                  Create Solo Package
+                </span>
+              </button>
+              {/* Group */}
+              <button
+                onClick={() => openFormForType("group")}
+                className="flex flex-col rounded-lg border-2 border-gray-200 p-5 text-left transition-colors hover:border-blue-600 hover:bg-blue-50"
+              >
+                <span className="inline-flex w-fit rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-semibold text-blue-700">
+                  Group Package
+                </span>
+                <h3 className="mt-3 text-lg font-semibold text-foreground">
+                  Shared Yatra (Seat Booking)
+                </h3>
+                <p className="mt-1 text-sm text-gray-500">
+                  Book individual seats on a weekly recurring schedule.
+                </p>
+                <ul className="mt-3 space-y-1 text-xs text-gray-600">
+                  <li>• Seat management enabled</li>
+                  <li>• Weekly recurring schedule</li>
+                  <li>• Per-seat pricing</li>
+                </ul>
+                <span className="mt-4 inline-flex w-fit items-center gap-1 rounded-md bg-blue-600 px-3 py-1.5 text-sm font-medium text-white">
+                  Create Group Package
+                </span>
+              </button>
+            </div>
+            <p className="border-t border-gray-200 px-6 py-3 text-center text-xs text-gray-400">
+              Package type cannot be changed after creation.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Add/Edit Modal */}
       {isModalOpen && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 p-4">
           <div className="max-h-[90vh] w-full max-w-2xl overflow-hidden rounded-lg bg-card-bg shadow-xl">
             {/* Modal Header */}
             <div className="flex items-center justify-between border-b border-gray-200 px-6 py-4">
-              <h2 className="text-xl font-semibold text-foreground">
-                {editingPackage ? "Edit Yatra Package" : "Add Yatra Package"}
-              </h2>
+              <div className="flex items-center gap-3">
+                <h2 className="text-xl font-semibold text-foreground">
+                  {editingPackage ? "Edit" : "Add"}{" "}
+                  {formData.package_type === "group" ? "Group" : "Solo"} Package
+                </h2>
+                <span
+                  className={`rounded-full px-2.5 py-0.5 text-xs font-semibold ${
+                    formData.package_type === "group"
+                      ? "bg-blue-100 text-blue-700"
+                      : "bg-brand-red/10 text-brand-red"
+                  }`}
+                >
+                  {formData.package_type === "group"
+                    ? "GROUP · Shared Yatra"
+                    : "SOLO · Private Vehicle"}
+                </span>
+              </div>
               <button
                 onClick={closeModal}
                 className="rounded p-1 text-gray-500 hover:bg-gray-100"
@@ -833,6 +1176,31 @@ export default function YatraPage() {
               style={{ maxHeight: "calc(90vh - 140px)" }}
             >
               <div className="space-y-4">
+                {/* Type-immutability warning (edit only) */}
+                {editingPackage && (
+                  <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800">
+                    <svg
+                      xmlns="http://www.w3.org/2000/svg"
+                      fill="none"
+                      viewBox="0 0 24 24"
+                      strokeWidth={1.8}
+                      stroke="currentColor"
+                      className="mt-0.5 h-4 w-4 flex-shrink-0"
+                    >
+                      <path
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                        d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"
+                      />
+                    </svg>
+                    <span>
+                      <strong>Package type cannot be changed.</strong> This package
+                      stays a {formData.package_type === "group" ? "Group" : "Solo"}{" "}
+                      package to avoid pricing and booking conflicts.
+                    </span>
+                  </div>
+                )}
+
                 {/* Vehicle */}
                 <div>
                   <label className="mb-1 block text-sm font-medium text-foreground">
@@ -922,45 +1290,40 @@ export default function YatraPage() {
                   </div>
                   <div>
                     <label className="mb-1 block text-sm font-medium text-foreground">
-                      Days
+                      Days <span className="text-xs font-normal text-gray-400">(max 7)</span>
                     </label>
                     <input
                       type="number"
                       value={formData.duration_days}
-                      onChange={(e) =>
-                        setFormData({
-                          ...formData,
-                          duration_days: parseInt(e.target.value) || 0,
-                        })
-                      }
+                      onChange={(e) => handleDaysChange(parseInt(e.target.value))}
                       min="0"
+                      max="7"
                       className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand-red focus:outline-none focus:ring-1 focus:ring-brand-red"
                     />
                   </div>
                   <div>
                     <label className="mb-1 block text-sm font-medium text-foreground">
-                      Nights
+                      Nights{" "}
+                      <span className="text-xs font-normal text-gray-400">(auto)</span>
                     </label>
                     <input
                       type="number"
                       value={formData.duration_nights}
-                      onChange={(e) =>
-                        setFormData({
-                          ...formData,
-                          duration_nights: parseInt(e.target.value) || 0,
-                        })
-                      }
+                      readOnly
+                      tabIndex={-1}
                       min="0"
-                      className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand-red focus:outline-none focus:ring-1 focus:ring-brand-red"
+                      className="w-full cursor-not-allowed rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm text-gray-600"
                     />
                   </div>
                 </div>
 
-                {/* Price */}
+                {/* Price — label and fields differ by package type */}
                 <div className="grid grid-cols-2 gap-4">
                   <div>
                     <label className="mb-1 block text-sm font-medium text-foreground">
-                      Base Price (₹)
+                      {formData.package_type === "group"
+                        ? "Price Per Seat (₹)"
+                        : "Base Price (₹)"}
                     </label>
                     <input
                       type="number"
@@ -976,24 +1339,244 @@ export default function YatraPage() {
                       className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand-red focus:outline-none focus:ring-1 focus:ring-brand-red"
                     />
                   </div>
-                  <div>
-                    <label className="mb-1 block text-sm font-medium text-foreground">
-                      Price per km (₹)
-                    </label>
-                    <input
-                      type="number"
-                      value={formData.price_per_km}
-                      onChange={(e) =>
-                        setFormData({
-                          ...formData,
-                          price_per_km: parseFloat(e.target.value) || 0,
-                        })
-                      }
-                      min="0"
-                      step="0.01"
-                      className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand-red focus:outline-none focus:ring-1 focus:ring-brand-red"
-                    />
+                  {/* Price per km only applies to full-vehicle (solo) packages */}
+                  {formData.package_type === "solo" && (
+                    <div>
+                      <label className="mb-1 block text-sm font-medium text-foreground">
+                        Price per km (₹)
+                      </label>
+                      <input
+                        type="number"
+                        value={formData.price_per_km}
+                        onChange={(e) =>
+                          setFormData({
+                            ...formData,
+                            price_per_km: parseFloat(e.target.value) || 0,
+                          })
+                        }
+                        min="0"
+                        step="0.01"
+                        className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand-red focus:outline-none focus:ring-1 focus:ring-brand-red"
+                      />
+                    </div>
+                  )}
+                  {/* Group: computed total = seats × price per seat (read-only) */}
+                  {formData.package_type === "group" && (
+                    <div>
+                      <label className="mb-1 block text-sm font-medium text-foreground">
+                        Total Package Price (₹)
+                      </label>
+                      <div className="flex h-[38px] items-center rounded-md border border-gray-200 bg-gray-50 px-3 py-2 text-sm font-semibold text-brand-red">
+                        ₹
+                        {(
+                          (formData.price || 0) * (formData.seats_total || 0)
+                        ).toLocaleString()}
+                      </div>
+                      <p className="mt-1 text-xs text-gray-500">
+                        {formData.seats_total || 0} seats × ₹
+                        {(formData.price || 0).toLocaleString()}/seat
+                      </p>
+                    </div>
+                  )}
+                </div>
+
+                {/* Weekly Schedule & Seat Management — GROUP packages only */}
+                {formData.package_type === "group" && (
+                  <div className="space-y-4 rounded-lg border border-blue-200 bg-blue-50/50 p-4">
+                    <h3 className="flex items-center gap-2 text-sm font-semibold text-blue-800">
+                      <svg
+                        xmlns="http://www.w3.org/2000/svg"
+                        fill="none"
+                        viewBox="0 0 24 24"
+                        strokeWidth={1.8}
+                        stroke="currentColor"
+                        className="h-4 w-4"
+                      >
+                        <path
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          d="M6.75 3v2.25M17.25 3v2.25M3 18.75V7.5a2.25 2.25 0 0 1 2.25-2.25h13.5A2.25 2.25 0 0 1 21 7.5v11.25m-18 0A2.25 2.25 0 0 0 5.25 21h13.5A2.25 2.25 0 0 0 21 18.75m-18 0v-7.5A2.25 2.25 0 0 1 5.25 9h13.5A2.25 2.25 0 0 1 21 11.25v7.5"
+                        />
+                      </svg>
+                      Weekly Schedule &amp; Seat Management
+                    </h3>
+
+                    {/* Available days — pick the START day; the trip runs that many
+                        consecutive days (from "Days" above). Always continuous. */}
+                    <div>
+                      <div className="mb-2 flex items-center justify-between">
+                        <label className="block text-xs font-medium text-gray-600">
+                          Starting Day <span className="text-red-500">*</span>
+                        </label>
+                        <span className="rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-semibold text-blue-700">
+                          {formData.weekdays.length} day
+                          {formData.weekdays.length === 1 ? "" : "s"}
+                        </span>
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {WEEKDAY_LABELS.map((label, idx) => {
+                          const inRange = formData.weekdays.includes(idx);
+                          const isStart = idx === scheduleStartDay;
+                          return (
+                            <button
+                              key={idx}
+                              type="button"
+                              onClick={() => selectStartDay(idx)}
+                              aria-pressed={isStart}
+                              title={isStart ? "Start day" : inRange ? "Included" : "Set as start day"}
+                              className={`rounded-full px-3 py-1.5 text-sm font-medium transition-colors ${
+                                isStart
+                                  ? "bg-blue-600 text-white ring-2 ring-blue-300"
+                                  : inRange
+                                  ? "bg-blue-100 text-blue-700"
+                                  : "bg-white text-gray-600 ring-1 ring-gray-300 hover:bg-gray-50"
+                              }`}
+                            >
+                              {label}
+                            </button>
+                          );
+                        })}
+                      </div>
+                      <p className="mt-2 text-xs text-gray-500">
+                        {formData.weekdays.length > 0 ? (
+                          <>
+                            Runs every:{" "}
+                            <span className="font-medium text-blue-700">
+                              {formData.weekdays
+                                .map((d) => WEEKDAY_LABELS[d])
+                                .join(" · ")}
+                            </span>{" "}
+                            ({formData.duration_days || 0} consecutive day
+                            {formData.duration_days === 1 ? "" : "s"} from{" "}
+                            {WEEKDAY_LABELS[scheduleStartDay]})
+                          </>
+                        ) : (
+                          "Set the number of Days above to build the schedule."
+                        )}
+                      </p>
+                    </div>
+
+                    {/* Departure / arrival time */}
+                    <div className="grid grid-cols-2 gap-4">
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-gray-600">
+                          Departure Time <span className="text-red-500">*</span>
+                        </label>
+                        <input
+                          type="time"
+                          value={formData.departure_time}
+                          onChange={(e) =>
+                            setFormData({ ...formData, departure_time: e.target.value })
+                          }
+                          className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand-red focus:outline-none focus:ring-1 focus:ring-brand-red"
+                        />
+                      </div>
+                      <div>
+                        <label className="mb-1 block text-xs font-medium text-gray-600">
+                          Arrival Time
+                        </label>
+                        <input
+                          type="time"
+                          value={formData.arrival_time}
+                          onChange={(e) =>
+                            setFormData({ ...formData, arrival_time: e.target.value })
+                          }
+                          className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand-red focus:outline-none focus:ring-1 focus:ring-brand-red"
+                        />
+                      </div>
+                    </div>
+
+                    {/* Seats per week */}
+                    <div>
+                      <label className="mb-1 block text-xs font-medium text-gray-600">
+                        Seats Available (per week){" "}
+                        <span className="text-red-500">*</span>
+                      </label>
+                      <input
+                        type="number"
+                        min="1"
+                        value={formData.seats_total}
+                        onChange={(e) =>
+                          setFormData({
+                            ...formData,
+                            seats_total: parseInt(e.target.value) || 0,
+                          })
+                        }
+                        className="w-40 rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand-red focus:outline-none focus:ring-1 focus:ring-brand-red"
+                      />
+                      <p className="mt-1 text-xs text-gray-500">
+                        These seats reset each week. Once a day&apos;s departure passes,
+                        availability rolls forward to next week.
+                      </p>
+                    </div>
                   </div>
+                )}
+
+                {/* Payment Options — applies to both Solo and Group packages */}
+                <div className="space-y-2">
+                  <label className="block text-sm font-medium text-foreground">
+                    Payment Options for Users <span className="text-red-500">*</span>
+                  </label>
+                  <div className="grid gap-3 sm:grid-cols-2">
+                    <label
+                      className={`flex cursor-pointer items-start gap-2 rounded-lg border-2 p-3 transition-colors ${
+                        formData.allow_direct_payment
+                          ? "border-brand-red bg-brand-red/5"
+                          : "border-gray-200 hover:border-gray-300"
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={formData.allow_direct_payment}
+                        onChange={(e) =>
+                          setFormData({
+                            ...formData,
+                            allow_direct_payment: e.target.checked,
+                          })
+                        }
+                        className="mt-0.5 h-4 w-4 rounded border-gray-300 text-brand-red focus:ring-brand-red"
+                      />
+                      <span>
+                        <span className="block text-sm font-medium text-foreground">
+                          Direct Payment
+                        </span>
+                        <span className="block text-xs text-gray-500">
+                          Online payments via UPI, Card, Net Banking, etc.
+                        </span>
+                      </span>
+                    </label>
+                    <label
+                      className={`flex cursor-pointer items-start gap-2 rounded-lg border-2 p-3 transition-colors ${
+                        formData.allow_cod
+                          ? "border-brand-red bg-brand-red/5"
+                          : "border-gray-200 hover:border-gray-300"
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={formData.allow_cod}
+                        onChange={(e) =>
+                          setFormData({
+                            ...formData,
+                            allow_cod: e.target.checked,
+                          })
+                        }
+                        className="mt-0.5 h-4 w-4 rounded border-gray-300 text-brand-red focus:ring-brand-red"
+                      />
+                      <span>
+                        <span className="block text-sm font-medium text-foreground">
+                          Cash on Delivery (COD)
+                        </span>
+                        <span className="block text-xs text-gray-500">
+                          Cash payment option at the time of travel.
+                        </span>
+                      </span>
+                    </label>
+                  </div>
+                  <p className="text-xs text-gray-400">
+                    Selected payment methods will be visible to users on the booking
+                    page. At least one is required.
+                  </p>
                 </div>
 
                 {/* Route Description */}
