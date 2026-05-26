@@ -185,6 +185,33 @@ export default function AlertsPage() {
     if (file?.type.startsWith("image/")) setPendingImage(file);
   };
 
+  // Remove the current image from an alert being edited. Hits the upload
+  // route's DELETE side, which removes the storage file AND clears
+  // alerts.image_url. Optimistically clears it locally so the modal updates
+  // without waiting for the list refetch.
+  const handleRemoveExistingImage = async () => {
+    if (!editingAlert?.id) return;
+    if (!confirm("Remove the current image from this alert?")) return;
+    try {
+      const res = await fetch(
+        `/api/alerts/upload?alertId=${encodeURIComponent(editingAlert.id)}`,
+        { method: "DELETE" }
+      );
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        showToast("error", data.error || "Failed to remove image");
+        return;
+      }
+      setEditingAlert({ ...editingAlert, image_url: null });
+      setPendingImage(null);
+      showToast("success", "Image removed");
+      await fetchAlerts();
+    } catch (error) {
+      console.error("Failed to remove alert image:", error);
+      showToast("error", "Failed to remove image");
+    }
+  };
+
   const uploadImage = async (alertId: string, alertTitle: string) => {
     if (!pendingImage) return;
 
@@ -885,19 +912,51 @@ export default function AlertsPage() {
                       </div>
                     </div>
                   ) : editingAlert?.image_url ? (
-                    <div className="flex flex-col items-center gap-1">
-                      <div className="relative h-24 w-full max-w-xs">
+                    // Existing image on an alert being edited. Stop click
+                    // propagation so the inner buttons don't also trigger the
+                    // dropzone's file-picker click on the parent div.
+                    <div
+                      className="flex w-full flex-col items-center gap-2"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {/* Larger, full-fit preview so the admin can actually
+                          see what's there (was a 24px tall cropped strip). */}
+                      <div className="relative h-40 w-full max-w-sm">
                         <Image
                           src={editingAlert.image_url}
-                          alt="Alert"
+                          alt="Current alert image"
                           fill
-                          className="rounded object-cover"
+                          className="rounded object-contain"
                           unoptimized
                         />
                       </div>
                       <span className="text-xs text-gray-400">
-                        Current image — click to replace
+                        Current image
                       </span>
+                      <div className="flex items-center gap-2">
+                        <button
+                          type="button"
+                          onClick={() => fileInputRef.current?.click()}
+                          className="rounded-md px-2.5 py-1 text-xs font-medium text-brand-red ring-1 ring-brand-red/40 hover:bg-red-50"
+                        >
+                          Change
+                        </button>
+                        <button
+                          type="button"
+                          onClick={handleRemoveExistingImage}
+                          className="rounded-md px-2.5 py-1 text-xs font-medium text-red-600 ring-1 ring-red-300 hover:bg-red-50"
+                        >
+                          Remove
+                        </button>
+                        <a
+                          href={editingAlert.image_url}
+                          target="_blank"
+                          rel="noopener noreferrer"
+                          className="rounded-md px-2.5 py-1 text-xs font-medium text-gray-600 ring-1 ring-gray-300 hover:bg-gray-50"
+                        >
+                          View full
+                        </a>
+                      </div>
                     </div>
                   ) : (
                     <>
