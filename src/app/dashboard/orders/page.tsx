@@ -4,12 +4,7 @@ import { useEffect, useState } from "react";
 import { useToast } from "@/components/Toast";
 
 type OrderStatus = "pending" | "confirmed" | "cancelled" | "completed";
-type PaymentStatus =
-  | "pending"
-  | "paid"
-  | "failed"
-  | "refunded"
-  | "cod_pending";
+type PaymentStatus = "pending" | "paid" | "failed" | "refunded" | "cod_pending";
 
 interface OrderItem {
   id: string;
@@ -41,14 +36,14 @@ interface Order {
 
 const STATUS_TABS: { value: "all" | OrderStatus; label: string }[] = [
   { value: "all", label: "All" },
-  { value: "pending", label: "Pending" },
+  // { value: "pending", label: "Pending" },
   { value: "confirmed", label: "Confirmed" },
   { value: "completed", label: "Completed" },
   { value: "cancelled", label: "Cancelled" },
 ];
 
 const STATUS_OPTIONS: OrderStatus[] = [
-  "pending",
+  // "pending",
   "confirmed",
   "cancelled",
   "completed",
@@ -85,7 +80,33 @@ function formatDateTime(iso: string) {
   });
 }
 
-export default function OrdersPage() {
+interface OrdersPageProps {
+  itemTypeFilter?: string;
+
+  onStatsChange?: (stats: {
+    totalOrders: number;
+    revenue: number;
+    onlineOrders: number;
+    codOrders: number;
+    pendingOrders: number;
+  }) => void;
+}
+interface OrdersPageProps {
+  itemTypeFilter?: string;
+
+  onStatsChange?: (stats: {
+    totalOrders: number;
+    revenue: number;
+    onlineOrders: number;
+    codOrders: number;
+    pendingOrders: number;
+  }) => void;
+}
+
+export default function OrdersPage({
+  onStatsChange,
+  itemTypeFilter,
+}: OrdersPageProps) {
   const { showToast } = useToast();
   const [orders, setOrders] = useState<Order[]>([]);
   const [isLoading, setIsLoading] = useState(true);
@@ -122,11 +143,16 @@ export default function OrdersPage() {
   const isCod = (o: Order) => (o.payment_method || "").toLowerCase() === "cod";
 
   const visible = orders.filter((o) => {
+    const itemTypeOk =
+      !itemTypeFilter ||
+      (o.order_items || []).some((i) => i.item_type === itemTypeFilter);
+
     const statusOk = activeTab === "all" || o.status === activeTab;
+
     const payOk =
-      payFilter === "all" ||
-      (payFilter === "cod" ? isCod(o) : !isCod(o));
-    return statusOk && payOk;
+      payFilter === "all" || (payFilter === "cod" ? isCod(o) : !isCod(o));
+
+    return itemTypeOk && statusOk && payOk;
   });
 
   const counts = STATUS_TABS.reduce(
@@ -143,20 +169,21 @@ export default function OrdersPage() {
           : base.filter((o) => o.status === t.value).length;
       return acc;
     },
-    {} as Record<string, number>
+    {} as Record<string, number>,
   );
 
-  const payCounts = {
-    all: orders.length,
-    online: orders.filter((o) => !isCod(o)).length,
-    cod: orders.filter((o) => isCod(o)).length,
-  };
+  // const payCounts = {
+  //   all: orders.length,
+  //   online: orders.filter((o) => !isCod(o)).length,
+  //   cod: orders.filter((o) => isCod(o)).length,
+  // };
+  // const pendingCount = orders.filter((o) => o.status === "pending").length;
 
-  // Summary strip: revenue across the currently-visible (filtered) orders,
-  // excluding cancelled ones so the figure reflects real expected revenue.
-  const visibleRevenue = visible
-    .filter((o) => o.status !== "cancelled")
-    .reduce((sum, o) => sum + (o.total_amount ?? 0), 0);
+  // // Summary strip: revenue across the currently-visible (filtered) orders,
+  // // excluding cancelled ones so the figure reflects real expected revenue.
+  // const visibleRevenue = visible
+  //   .filter((o) => o.status !== "cancelled")
+  //   .reduce((sum, o) => sum + (o.total_amount ?? 0), 0);
 
   const patchOrder = async (
     body: {
@@ -165,7 +192,7 @@ export default function OrdersPage() {
       payment_status?: PaymentStatus;
       cancellation_reason?: string;
     },
-    successMsg: string
+    successMsg: string,
   ) => {
     setIsSaving(true);
     try {
@@ -181,10 +208,10 @@ export default function OrdersPage() {
       }
       showToast("success", successMsg);
       setOrders((prev) =>
-        prev.map((o) => (o.id === body.id ? { ...o, ...data.order } : o))
+        prev.map((o) => (o.id === body.id ? { ...o, ...data.order } : o)),
       );
       setSelected((prev) =>
-        prev && prev.id === body.id ? { ...prev, ...data.order } : prev
+        prev && prev.id === body.id ? { ...prev, ...data.order } : prev,
       );
     } catch (error) {
       console.error("Failed to update order:", error);
@@ -198,12 +225,12 @@ export default function OrdersPage() {
     if (order.status === "cancelled") return;
     const reason = window.prompt(
       "Cancel this order? Optionally add a reason (shown in notes):",
-      ""
+      "",
     );
     if (reason === null) return;
     patchOrder(
       { id: order.id, status: "cancelled", cancellation_reason: reason },
-      "Order cancelled"
+      "Order cancelled",
     );
   };
 
@@ -214,6 +241,35 @@ export default function OrdersPage() {
     const types = Array.from(new Set(items.map((it) => it.item_type)));
     return `${items.length} item${items.length === 1 ? "" : "s"} · ${totalQty} qty · ${types.join(", ")}`;
   };
+
+  const payCounts = {
+    all: orders.length,
+    online: orders.filter((o) => !isCod(o)).length,
+    cod: orders.filter((o) => isCod(o)).length,
+  };
+
+  const visibleRevenue = visible
+    .filter((o) => o.status !== "cancelled")
+    .reduce((sum, o) => sum + (o.total_amount ?? 0), 0);
+
+  const pendingCount = orders.filter((o) => o.status === "pending").length;
+
+  useEffect(() => {
+    onStatsChange?.({
+      totalOrders: orders.length,
+      revenue: visibleRevenue,
+      onlineOrders: payCounts.online,
+      codOrders: payCounts.cod,
+      pendingOrders: pendingCount,
+    });
+  }, [
+    orders,
+    visibleRevenue,
+    pendingCount,
+    payCounts.online,
+    payCounts.cod,
+    onStatsChange,
+  ]);
 
   if (isLoading) {
     return (
@@ -246,70 +302,87 @@ export default function OrdersPage() {
     <div className="space-y-5">
       {/* Header + summary strip */}
       <div className="flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-        <div>
+        {/* <div>
           <h1 className="text-2xl font-bold text-foreground">Orders</h1>
           <p className="text-sm text-gray-500">
             Product orders (prasad, frames, cloths, seva) with delivery. Yatra
             bookings are under Yatra Bookings.
           </p>
-        </div>
-        <div className="flex flex-wrap gap-2">
+        </div> */}
+        {/* <div className="flex flex-wrap gap-2">
           <SummaryCard label="Orders" value={String(orders.length)} />
           <SummaryCard
             label="Revenue"
             value={`₹${visibleRevenue.toLocaleString()}`}
-            hint={payFilter === "all" && activeTab === "all" ? "all" : "filtered"}
+            hint={
+              payFilter === "all" && activeTab === "all" ? "all" : "filtered"
+            }
           />
           <SummaryCard label="Online" value={String(payCounts.online)} />
           <SummaryCard label="COD" value={String(payCounts.cod)} />
-        </div>
+        </div> */}
       </div>
 
       {/* Filters card */}
-      <div className="space-y-3 rounded-xl bg-card-bg p-4 shadow-sm ring-1 ring-gray-100">
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="w-16 text-xs font-semibold uppercase tracking-wide text-gray-400">
-            Status
-          </span>
-          {STATUS_TABS.map((tab) => (
-            <button
-              key={tab.value}
-              onClick={() => setActiveTab(tab.value)}
-              className={`rounded-full px-3 py-1.5 text-sm font-medium transition-colors ${
-                activeTab === tab.value
-                  ? "bg-brand-red text-white shadow-sm"
-                  : "bg-gray-50 text-gray-600 ring-1 ring-gray-200 hover:bg-gray-100"
-              }`}
-            >
-              {tab.label}
-              <span className="ml-1.5 opacity-70">({counts[tab.value] ?? 0})</span>
-            </button>
-          ))}
-        </div>
-        <div className="flex flex-wrap items-center gap-2">
-          <span className="w-16 text-xs font-semibold uppercase tracking-wide text-gray-400">
-            Payment
-          </span>
-          {(
-            [
-              { value: "all", label: "All" },
-              { value: "online", label: "Online Payment" },
-              { value: "cod", label: "Cash on Delivery" },
-            ] as const
-          ).map((p) => (
-            <button
-              key={p.value}
-              onClick={() => setPayFilter(p.value)}
-              className={`rounded-full px-3 py-1.5 text-sm font-medium transition-colors ${
-                payFilter === p.value
-                  ? "bg-blue-600 text-white shadow-sm"
-                  : "bg-gray-50 text-gray-600 ring-1 ring-gray-200 hover:bg-gray-100"
-              }`}
-            >
-              {p.label}
-              <span className="ml-1.5 opacity-70">({payCounts[p.value]})</span>
-            </button>
-          ))}
+      {/* Filters */}
+      <div className="rounded-xl bg-card-bg p-4 shadow-sm ring-1 ring-gray-100">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          {/* Status Tabs */}
+          <div className="border-b border-gray-200">
+            <div className="flex items-center gap-6 overflow-x-auto">
+              {STATUS_TABS.map((tab) => (
+                <button
+                  key={tab.value}
+                  onClick={() => setActiveTab(tab.value)}
+                  className={`relative whitespace-nowrap py-3 text-sm font-medium transition-colors ${
+                    activeTab === tab.value
+                      ? "text-gray-900"
+                      : "text-gray-500 hover:text-gray-700"
+                  }`}
+                >
+                  <span>{tab.label}</span>
+
+                  <span
+                    className={`ml-2 rounded-full px-2 py-0.5 text-xs ${
+                      activeTab === tab.value
+                        ? "bg-gray-900 text-white"
+                        : "bg-gray-100 text-gray-600"
+                    }`}
+                  >
+                    {counts[tab.value]}
+                  </span>
+
+                  {activeTab === tab.value && (
+                    <span className="absolute bottom-0 left-0 h-0.5 w-full bg-brand-red" />
+                  )}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          {/* Payment Filter */}
+          <div className="inline-flex rounded-xl border border-gray-200 bg-white p-1">
+            {(
+              [
+                { value: "all", label: "All" },
+                { value: "online", label: "Online" },
+                { value: "cod", label: "COD" },
+              ] as const
+            ).map((p) => (
+              <button
+                key={p.value}
+                onClick={() => setPayFilter(p.value)}
+                className={`rounded-lg px-4 py-2 text-sm font-medium transition-all ${
+                  payFilter === p.value
+                    ? "bg-gray-900 text-white shadow-sm"
+                    : "text-gray-600 hover:bg-gray-50"
+                }`}
+              >
+                {p.label}
+                <span className="ml-2 opacity-70">({payCounts[p.value]})</span>
+              </button>
+            ))}
+          </div>
         </div>
       </div>
 
@@ -329,8 +402,12 @@ export default function OrdersPage() {
               d="m20.25 7.5-.625 10.632a2.25 2.25 0 0 1-2.247 2.118H6.622a2.25 2.25 0 0 1-2.247-2.118L3.75 7.5M10 11.25h4M3.375 7.5h17.25c.621 0 1.125-.504 1.125-1.125v-1.5c0-.621-.504-1.125-1.125-1.125H3.375c-.621 0-1.125.504-1.125 1.125v1.5c0 .621.504 1.125 1.125 1.125Z"
             />
           </svg>
-          <p className="mt-3 text-sm font-medium text-gray-500">No orders match these filters.</p>
-          <p className="mt-1 text-xs text-gray-400">Try switching the status or payment filter above.</p>
+          <p className="mt-3 text-sm font-medium text-gray-500">
+            No orders match these filters.
+          </p>
+          <p className="mt-1 text-xs text-gray-400">
+            Try switching the status or payment filter above.
+          </p>
         </div>
       ) : (
         <div className="overflow-hidden rounded-xl bg-card-bg shadow-sm ring-1 ring-gray-100">
@@ -349,7 +426,10 @@ export default function OrdersPage() {
               </thead>
               <tbody className="divide-y divide-gray-100">
                 {visible.map((o) => (
-                  <tr key={o.id} className="transition-colors hover:bg-brand-red/[0.03]">
+                  <tr
+                    key={o.id}
+                    className="transition-colors hover:bg-brand-red/[0.03]"
+                  >
                     <td className="px-5 py-4">
                       <div className="font-semibold text-foreground">
                         {o.order_number || o.id.slice(0, 8)}
@@ -366,7 +446,9 @@ export default function OrdersPage() {
                         {o.customer_phone || o.customer_email || ""}
                       </div>
                     </td>
-                    <td className="px-5 py-4 text-gray-600">{itemsSummary(o)}</td>
+                    <td className="px-5 py-4 text-gray-600">
+                      {itemsSummary(o)}
+                    </td>
                     <td className="px-5 py-4 text-right font-semibold text-foreground">
                       {o.total_amount != null
                         ? `₹${o.total_amount.toLocaleString()}`
@@ -520,7 +602,7 @@ export default function OrdersPage() {
                             id: selected.id,
                             status: e.target.value as OrderStatus,
                           },
-                          "Status updated"
+                          "Status updated",
                         )
                       }
                       className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand-red focus:outline-none focus:ring-1 focus:ring-brand-red"
@@ -545,7 +627,7 @@ export default function OrdersPage() {
                             id: selected.id,
                             payment_status: e.target.value as PaymentStatus,
                           },
-                          "Payment status updated"
+                          "Payment status updated",
                         )
                       }
                       className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand-red focus:outline-none focus:ring-1 focus:ring-brand-red"
@@ -640,7 +722,9 @@ function PaymentCell({
     <div className="space-y-1">
       <span
         className={`inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-xs font-medium ${
-          isCod ? "bg-orange-100 text-orange-700" : "bg-indigo-100 text-indigo-700"
+          isCod
+            ? "bg-orange-100 text-orange-700"
+            : "bg-indigo-100 text-indigo-700"
         }`}
       >
         {isCod ? "COD" : "Online"}
