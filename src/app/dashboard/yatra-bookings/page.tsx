@@ -4,12 +4,7 @@ import { useEffect, useState } from "react";
 import { useToast } from "@/components/Toast";
 
 type OrderStatus = "pending" | "confirmed" | "cancelled" | "completed";
-type PaymentStatus =
-  | "pending"
-  | "paid"
-  | "failed"
-  | "refunded"
-  | "cod_pending";
+type PaymentStatus = "pending" | "paid" | "failed" | "refunded" | "cod_pending";
 
 interface YatraPackageLite {
   id: string;
@@ -51,14 +46,14 @@ interface Booking {
 
 const STATUS_TABS: { value: "all" | OrderStatus; label: string }[] = [
   { value: "all", label: "All" },
-  { value: "pending", label: "Pending" },
+  // { value: "pending", label: "Pending" },
   { value: "confirmed", label: "Confirmed" },
   { value: "completed", label: "Completed" },
   { value: "cancelled", label: "Cancelled" },
 ];
 
 const STATUS_OPTIONS: OrderStatus[] = [
-  "pending",
+  // "pending",
   "confirmed",
   "cancelled",
   "completed",
@@ -139,7 +134,7 @@ export default function OrdersPage() {
           : bookings.filter((b) => b.status === t.value).length;
       return acc;
     },
-    {} as Record<string, number>
+    {} as Record<string, number>,
   );
 
   const patchBooking = async (
@@ -149,7 +144,7 @@ export default function OrdersPage() {
       payment_status?: PaymentStatus;
       cancellation_reason?: string;
     },
-    successMsg: string
+    successMsg: string,
   ) => {
     setIsSaving(true);
     try {
@@ -166,10 +161,10 @@ export default function OrdersPage() {
       showToast("success", successMsg);
       // Update local state from the returned order.
       setBookings((prev) =>
-        prev.map((b) => (b.id === body.id ? { ...b, ...data.order } : b))
+        prev.map((b) => (b.id === body.id ? { ...b, ...data.order } : b)),
       );
       setSelected((prev) =>
-        prev && prev.id === body.id ? { ...prev, ...data.order } : prev
+        prev && prev.id === body.id ? { ...prev, ...data.order } : prev,
       );
     } catch (error) {
       console.error("Failed to update booking:", error);
@@ -183,13 +178,13 @@ export default function OrdersPage() {
     if (booking.status === "cancelled") return;
     const reason = window.prompt(
       "Cancel this booking? Optionally add a reason (shown in notes):",
-      ""
+      "",
     );
     // prompt returns null if the admin clicked Cancel on the dialog.
     if (reason === null) return;
     patchBooking(
       { id: booking.id, status: "cancelled", cancellation_reason: reason },
-      "Booking cancelled"
+      "Booking cancelled",
     );
   };
 
@@ -226,29 +221,44 @@ export default function OrdersPage() {
   return (
     <div className="space-y-6">
       {/* Header */}
-      <div>
+      {/* <div>
         <h1 className="text-2xl font-bold text-foreground">Yatra Bookings</h1>
         <p className="text-sm text-gray-500">
           View, manage, and cancel customer yatra bookings.
         </p>
-      </div>
+      </div> */}
 
       {/* Status tabs */}
-      <div className="flex flex-wrap gap-2">
-        {STATUS_TABS.map((tab) => (
-          <button
-            key={tab.value}
-            onClick={() => setActiveTab(tab.value)}
-            className={`rounded-full px-3 py-1.5 text-sm font-medium transition-colors ${
-              activeTab === tab.value
-                ? "bg-brand-red text-white"
-                : "bg-card-bg text-gray-600 ring-1 ring-gray-200 hover:bg-gray-50"
-            }`}
-          >
-            {tab.label}
-            <span className="ml-1.5 opacity-70">({counts[tab.value] ?? 0})</span>
-          </button>
-        ))}
+      <div className="rounded-2xl border border-gray-100 bg-white px-6 py-5 shadow-[0_4px_20px_rgba(0,0,0,0.05)]">
+        <div className="flex flex-wrap items-center gap-6">
+          {STATUS_TABS.map((tab) => (
+            <button
+              key={tab.value}
+              onClick={() => setActiveTab(tab.value)}
+              className={`group relative flex items-center gap-2 pb-3 text-sm font-medium transition-all ${
+                activeTab === tab.value
+                  ? "text-gray-900"
+                  : "text-gray-500 hover:text-gray-800"
+              }`}
+            >
+              <span>{tab.label}</span>
+
+              <span
+                className={`rounded-full px-2 py-0.5 text-xs font-semibold ${
+                  activeTab === tab.value
+                    ? "bg-[#071A3D] text-white"
+                    : "bg-gray-100 text-gray-600"
+                }`}
+              >
+                {counts[tab.value] ?? 0}
+              </span>
+
+              {activeTab === tab.value && (
+                <span className="absolute bottom-0 left-0 h-[3px] w-full rounded-full bg-brand-red" />
+              )}
+            </button>
+          ))}
+        </div>
       </div>
 
       {/* List */}
@@ -443,7 +453,9 @@ export default function OrdersPage() {
                           <div className="mt-1 flex flex-wrap gap-x-4 gap-y-1 text-xs text-gray-500">
                             <span>Qty / Seats: {it.quantity}</span>
                             {it.yatra_package.departure_time && (
-                              <span>Dep: {it.yatra_package.departure_time}</span>
+                              <span>
+                                Dep: {it.yatra_package.departure_time}
+                              </span>
                             )}
                             {it.yatra_package.arrival_time && (
                               <span>Arr: {it.yatra_package.arrival_time}</span>
@@ -457,7 +469,8 @@ export default function OrdersPage() {
                         </>
                       ) : (
                         <span className="text-gray-400">
-                          Package no longer available (item {it.item_id.slice(0, 8)})
+                          Package no longer available (item{" "}
+                          {it.item_id.slice(0, 8)})
                         </span>
                       )}
                     </div>
@@ -484,7 +497,7 @@ export default function OrdersPage() {
                             id: selected.id,
                             status: e.target.value as OrderStatus,
                           },
-                          "Status updated"
+                          "Status updated",
                         )
                       }
                       className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand-red focus:outline-none focus:ring-1 focus:ring-brand-red"
@@ -509,7 +522,7 @@ export default function OrdersPage() {
                             id: selected.id,
                             payment_status: e.target.value as PaymentStatus,
                           },
-                          "Payment status updated"
+                          "Payment status updated",
                         )
                       }
                       className="w-full rounded-md border border-gray-300 px-3 py-2 text-sm focus:border-brand-red focus:outline-none focus:ring-1 focus:ring-brand-red"
