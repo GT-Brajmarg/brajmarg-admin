@@ -1,0 +1,22 @@
+name: Sync to GitVercel-GeloraTech
+
+on:
+  push:
+    branches: [main]
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - name: Push to GitVercel-GeloraTech
+        run: |
+          git config user.name "GitVercel-GeloraTech"
+          git config user.email "git.vercel@geloratech.com"
+          git remote add userb "https://x-access-token:${{ secrets.GIT_VERCEL_PUSH_TOKEN }}@github.com/GitVercel-GeloraTech/brajmarg-admin.git"
+          git push userb main:main --force
